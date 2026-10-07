@@ -64,6 +64,7 @@ bun run dev
 | `POST /api/analyze-repo` | Audita un repo o carpeta. 10 req/hora por IP. Con `Accept: text/event-stream` responde NDJSON con progreso real (`{type:'progress', phase, pct, message}` → `{type:'done'}`) |
 | `GET /api/checks` · `GET /api/checks/[id]` · `DELETE` | Historial / detalle / borrado de snippets |
 | `GET /api/repo-checks` · `GET /api/repo-checks/[id]` · `DELETE` | Historial / detalle / borrado de repos |
+| `GET /api/repo-trend?repo=owner/name` | Serie temporal del Vibe Score (excluye audits en modo diff) |
 | `GET /api/badge/[owner]/[repo].svg` | Badge SVG con el último Vibe Score auditado (nunca 404: sin datos → gris) |
 
 **Caché por contenido**: cada repo se audita una única vez por versión — la clave es el sha256 del tarball descargado (o de la carpeta). Re-auditar el mismo repo sin cambios responde al instante, sin quemar créditos de LLM.
@@ -87,6 +88,12 @@ echo $?                             # 1 si el veredicto es SOSPECHOSO o PELIGRO
 ```
 
 Útil como gate rápido en CI o para auditar antes de subir. La auditoría completa (IA, diff, caché) sigue disponible en la app web.
+
+### Comparación histórica
+
+Cada auditoría completa queda en el historial de tu instancia, y VibeCheck la convierte en tendencia: el reporte muestra una **sparkline con la evolución del Vibe Score** y el delta contra la auditoría anterior (`↘ −12 pts vs auditoría anterior`), y el badge SVG incluye la flecha (`↗/↘/→`) comparando las dos últimas auditorías. Las auditorías **en modo diff se excluyen** de la tendencia (puntúan solo los cambios, no el estado del repo).
+
+Endpoint: `GET /api/repo-trend?repo=owner/name` → serie de más antiguo a más reciente.
 
 ## Badge en tu README
 
@@ -119,6 +126,7 @@ Los contenidos de los archivos auditados **nunca se persisten**: solo el reporte
 - [x] Modo diff: auditar y puntuar solo los cambios desde un tag/rama/sha
 - [x] Repos privados vía PAT (por petición o `GITHUB_TOKEN` del servidor)
 - [x] CLI determinista local (`bun cli.ts`)
+- [x] Comparación histórica: sparkline + delta entre auditorías, badge con tendencia
 - [ ] OAuth de GitHub (token por sesión sin pegar PATs)
 - [ ] Modo diff también para carpetas locales (contra un snapshot guardado)
 - [ ] Publicar el CLI en npm (`npx vibecheck`)

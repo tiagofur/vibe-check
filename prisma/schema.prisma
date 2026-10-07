@@ -33,6 +33,8 @@ model VibeRepoCheck {
   filesScanned Int      @default(0)
   filesAudited Int      @default(0)
   totalLines   Int      @default(0)
+  /// true en modo diff: puntúa solo los cambios y se excluye de la tendencia
+  isDiff       Boolean  @default(false)
   /// Reporte completo serializado como JSON (sin contenidos de archivos)
   report       String
   createdAt    DateTime @default(now())

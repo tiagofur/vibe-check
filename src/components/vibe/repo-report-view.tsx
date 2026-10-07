@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   Accordion,
@@ -19,6 +19,8 @@ import {
   type CategoryKey,
 } from '@/lib/vibe-types'
 import type { RepoFinding, RepoReport, StructuralCheck } from '@/lib/repo-types'
+import { computeTrend, trendArrow, type TrendPoint } from '@/lib/trend'
+import { TrendSparkline } from '@/components/vibe/trend-sparkline'
 import { ScoreGauge, MiniRing } from '@/components/vibe/score-gauge'
 import {
   Check,
@@ -121,6 +123,30 @@ export function RepoReportView({
 }) {
   const { toast } = useToast()
   const [fileFilter, setFileFilter] = useState<string | null>(null)
+  const [trendData, setTrendData] = useState<{ repo: string; points: TrendPoint[] } | null>(null)
+
+  // Evolución histórica del repo (auditorías completas, sin diffs)
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const r = await fetch(`/api/repo-trend?repo=${encodeURIComponent(report.repoName)}`)
+        const d = r.ok ? ((await r.json()) as { trend?: TrendPoint[] }) : null
+        if (!cancelled) setTrendData(d?.trend ? { repo: report.repoName, points: d.trend } : null)
+      } catch {
+        if (!cancelled) setTrendData(null)
+      }
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [report.repoName])
+
+  const trend = useMemo(
+    () => (trendData && trendData.repo === report.repoName ? computeTrend(trendData.points) : null),
+    [trendData, report.repoName],
+  )
 
   const verdict = VERDICT_META[report.verdict]
 
@@ -226,6 +252,23 @@ export function RepoReportView({
                     </Badge>
                   )}
                 </div>
+                {trend && trend.series.length >= 2 && trend.delta !== null && (
+                  <div className="flex flex-wrap items-center justify-center gap-3 self-center rounded-lg border border-border bg-zinc-950/40 px-3 py-2 lg:self-start">
+                    <TrendSparkline points={trend.series} />
+                    <span
+                      className={`font-mono text-xs font-semibold ${
+                        trend.direction === 'up'
+                          ? 'text-emerald-400'
+                          : trend.direction === 'down'
+                            ? 'text-red-400'
+                            : 'text-muted-foreground'
+                      }`}
+                    >
+                      {trendArrow(trend.direction)} {trend.delta > 0 ? `+${trend.delta}` : trend.delta} pts vs auditoría
+                      anterior
+                    </span>
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center justify-center gap-2 pt-1 lg:justify-start">
                   <Button size="sm" variant="outline" onClick={copyReport} className="gap-1.5">
                     <Copy className="size-3.5" /> Copiar reporte MD

@@ -1,8 +1,10 @@
 // ─────────────────────────────────────────────────────────────
 // VibeCheck · Generador de badges SVG estilo shields.io
 // Sin dependencias: un string con el score y color de veredicto.
+// Con score previo muestra la flecha de tendencia (↗ ↘ →).
 // ─────────────────────────────────────────────────────────────
 
+import { computeTrend, trendArrow } from './trend'
 import { verdictFromScore } from './vibe-types'
 
 const LABEL_COLOR = '#555'
@@ -48,14 +50,21 @@ function shield(label: string, value: string, valueColor: string): string {
 /**
  * Badge del último Vibe Score auditado para un repo.
  * `score = null` → badge gris "no auditado" (los badges nunca deben 404).
+ * `previous` (score de la auditoría anterior, si existe) añade la flecha de tendencia.
  */
-export function buildBadgeSvg(score: number | null): string {
+export function buildBadgeSvg(score: number | null, previous?: number | null): string {
   if (score === null || Number.isNaN(score)) {
     return shield('vibe check', 'no auditado', UNKNOWN_COLOR)
   }
   const clamped = Math.max(0, Math.min(100, Math.round(score)))
-  return shield('vibe score', `${clamped}/100`, scoreColor(clamped))
+  let value = `${clamped}/100`
+  if (typeof previous === 'number' && !Number.isNaN(previous)) {
+    value += ` ${trendArrow(computeTrend([p(previous), p(clamped)]).direction)}`
+  }
+  return shield('vibe score', value, scoreColor(clamped))
 }
+
+const p = (score: number) => ({ score, createdAt: 'x' })
 
 /** Emoji del veredicto para mensajes (misma escala que la UI) */
 export function verdictEmoji(score: number): string {

@@ -15,19 +15,22 @@ export async function GET(
 ) {
   const { owner, repo } = await params
   let score: number | null = null
+  let previous: number | null = null
   try {
-    const check = await db.vibeRepoCheck.findFirst({
-      where: { repoName: `${decodeURIComponent(owner)}/${decodeURIComponent(repo)}`, source: 'github' },
+    const checks = await db.vibeRepoCheck.findMany({
+      where: { repoName: `${decodeURIComponent(owner)}/${decodeURIComponent(repo)}`, source: 'github', isDiff: false },
       orderBy: { createdAt: 'desc' },
       select: { score: true },
+      take: 2,
     })
-    score = check?.score ?? null
+    score = checks[0]?.score ?? null
+    previous = checks[1]?.score ?? null
   } catch (error) {
     console.error('[vibecheck] badge lookup failed:', error)
     // sin BD: badge gris en vez de romper el README ajeno
   }
 
-  return new NextResponse(buildBadgeSvg(score), {
+  return new NextResponse(buildBadgeSvg(score, previous), {
     status: 200,
     headers: {
       'Content-Type': 'image/svg+xml; charset=utf-8',

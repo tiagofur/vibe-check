@@ -428,6 +428,7 @@ async function runAudit(
             filesScanned: report.stats.filesScanned,
             filesAudited: report.stats.filesAudited,
             totalLines: report.stats.totalLines,
+            isDiff: Boolean(report.diff),
             report: hit.report,
           },
         })
@@ -549,6 +550,7 @@ async function runAudit(
         filesScanned: report.stats.filesScanned,
         filesAudited: report.stats.filesAudited,
         totalLines: report.stats.totalLines,
+        isDiff: Boolean(report.diff),
         report: JSON.stringify(report),
       },
     })

@@ -23,6 +23,15 @@ describe('buildBadgeSvg', () => {
     expect(svg).toContain('#9ca3af')
     expect(svg).toContain('<svg')
   })
+
+  it('con score previo añade la flecha de tendencia', () => {
+    expect(buildBadgeSvg(98, 93)).toContain('↗')
+    expect(buildBadgeSvg(80, 95)).toContain('↘')
+    expect(buildBadgeSvg(90, 90)).toContain('→')
+    // sin previo: sin flecha
+    expect(buildBadgeSvg(98)).not.toContain('↗')
+    expect(buildBadgeSvg(98)).not.toContain('↘')
+  })
 })
 
 describe('parseRepoStreamLine', () => {
