@@ -719,7 +719,9 @@ export default function Home() {
                   </Button>
                 </div>
 
-                {loading && <ScanProgress mode={tab} language={tab === 'snippet' ? language : undefined} />}
+                {loading && (
+                  <ScanProgress mode={tab === 'folder' ? 'files' : tab} language={tab === 'snippet' ? language : undefined} />
+                )}
               </CardContent>
             </Card>
           </motion.div>

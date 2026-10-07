@@ -3,7 +3,7 @@
 // Estrategia: triage determinista → auditoría por lotes → síntesis.
 // ─────────────────────────────────────────────────────────────
 
-import type { ZAI } from 'z-ai-web-dev-sdk'
+import type ZAI from 'z-ai-web-dev-sdk'
 import type { RepoFile, RepoFinding } from './repo-types'
 import type { CategoryKey, Severity } from './vibe-types'
 import { riskScore } from './repo-scan'

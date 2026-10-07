@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import type { RepoCheckHistoryItem, Verdict } from '@/lib/repo-types'
+import type { RepoCheckHistoryItem } from '@/lib/repo-types'
+import type { Verdict } from '@/lib/vibe-types'
 
 export const runtime = 'nodejs'
 
