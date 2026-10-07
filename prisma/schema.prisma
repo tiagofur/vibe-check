@@ -37,3 +37,15 @@ model VibeRepoCheck {
   report       String
   createdAt    DateTime @default(now())
 }
+
+/// Caché de auditorías por contenido: la clave es el sha256 del
+/// tarball (GitHub) o de los archivos (carpeta). Mismo contenido →
+/// mismo reporte, sin quemar LLM otra vez.
+model VibeCache {
+  key       String   @id
+  score     Int
+  verdict   String
+  /// RepoReport serializado
+  report    String
+  createdAt DateTime @default(now())
+}

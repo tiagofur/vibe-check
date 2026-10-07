@@ -14,9 +14,18 @@ import {
   Sparkles,
   Code2,
   FolderGit2,
+  Zap,
+  Database,
 } from 'lucide-react'
 
 type ScanMode = 'snippet' | 'github' | 'files'
+
+/** Progreso real emitido por el backend (NDJSON) */
+export interface LiveProgress {
+  phase: string
+  pct: number
+  message: string
+}
 
 const STEPS_BY_MODE: Record<ScanMode, { icon: typeof Code2; text: string }[]> = {
   snippet: [
@@ -48,18 +57,42 @@ const STEPS_BY_MODE: Record<ScanMode, { icon: typeof Code2; text: string }[]> = 
   ],
 }
 
-export function ScanProgress({ mode, language }: { mode: ScanMode; language?: string }) {
+/** Fase del backend → icono del panel de progreso */
+const PHASE_ICON: Record<string, typeof Code2> = {
+  descarga: Github,
+  estructura: FileSearch,
+  ia: Bug,
+  sintesis: Sparkles,
+  cache: Zap,
+  guardado: Database,
+}
+
+export function ScanProgress({
+  mode,
+  language,
+  live,
+}: {
+  mode: ScanMode
+  language?: string
+  live?: LiveProgress | null
+}) {
   const STEPS = STEPS_BY_MODE[mode] ?? STEPS_BY_MODE.snippet
   const [step, setStep] = useState(0)
 
+  const isLive = Boolean(live)
+
   useEffect(() => {
+    // con progreso real no hace falta el carrusel ficticio
+    if (isLive) return
     const id = setInterval(() => {
       setStep((s) => (s + 1) % STEPS.length)
     }, mode === 'snippet' ? 2600 : 4200)
     return () => clearInterval(id)
-  }, [STEPS.length, mode])
+  }, [STEPS.length, mode, isLive])
 
-  const Icon = STEPS[step]?.icon ?? Radar
+  const PhaseIcon = live ? PHASE_ICON[live.phase] ?? Radar : undefined
+  const Icon = PhaseIcon ?? STEPS[step]?.icon ?? Radar
+  const pct = live ? Math.min(100, Math.max(0, live.pct)) : null
 
   return (
     <div
@@ -71,7 +104,7 @@ export function ScanProgress({ mode, language }: { mode: ScanMode; language?: st
         <div className="relative flex size-11 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10">
           <AnimatePresence mode="wait">
             <motion.span
-              key={step}
+              key={live ? live.phase : step}
               initial={{ opacity: 0, scale: 0.6, rotate: -20 }}
               animate={{ opacity: 1, scale: 1, rotate: 0 }}
               exit={{ opacity: 0, scale: 0.6, rotate: 20 }}
@@ -94,18 +127,32 @@ export function ScanProgress({ mode, language }: { mode: ScanMode; language?: st
           </div>
           <AnimatePresence mode="wait">
             <motion.p
-              key={step}
+              key={live ? live.message : step}
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.22 }}
               className="truncate text-sm text-muted-foreground"
             >
-              {STEPS[step]?.text ?? 'Analizando…'}
+              {live ? live.message : (STEPS[step]?.text ?? 'Analizando…')}
             </motion.p>
           </AnimatePresence>
-          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-            <div className="vibe-scan-bar h-full w-1/3 rounded-full bg-gradient-to-r from-emerald-500 via-amber-400 to-emerald-500" />
+          <div className="mt-3 flex items-center gap-2">
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              {pct !== null ? (
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-amber-400 to-emerald-500 transition-all duration-700"
+                  style={{ width: `${pct}%` }}
+                />
+              ) : (
+                <div className="vibe-scan-bar h-full w-1/3 rounded-full bg-gradient-to-r from-emerald-500 via-amber-400 to-emerald-500" />
+              )}
+            </div>
+            {pct !== null && (
+              <span className="w-9 shrink-0 text-right font-mono text-[11px] text-emerald-400">
+                {pct}%
+              </span>
+            )}
           </div>
         </div>
       </div>

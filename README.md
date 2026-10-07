@@ -60,10 +60,25 @@ bun run dev
 
 | Endpoint | Descripción |
 |---|---|
-| `POST /api/analyze` | Audita un snippet (`{ code, language?, title? }`) |
-| `POST /api/analyze-repo` | Audita un repo (`{ source: 'github', url }`) o carpeta (`{ source: 'files', files: [...] }`) |
+| `POST /api/analyze` | Audita un snippet (`{ code, language?, title? }`). 20 req/hora por IP |
+| `POST /api/analyze-repo` | Audita un repo o carpeta. 10 req/hora por IP. Con `Accept: text/event-stream` responde NDJSON con progreso real (`{type:'progress', phase, pct, message}` → `{type:'done'}`) |
 | `GET /api/checks` · `GET /api/checks/[id]` · `DELETE` | Historial / detalle / borrado de snippets |
 | `GET /api/repo-checks` · `GET /api/repo-checks/[id]` · `DELETE` | Historial / detalle / borrado de repos |
+| `GET /api/badge/[owner]/[repo].svg` | Badge SVG con el último Vibe Score auditado (nunca 404: sin datos → gris) |
+
+**Caché por contenido**: cada repo se audita una única vez por versión — la clave es el sha256 del tarball descargado (o de la carpeta). Re-auditar el mismo repo sin cambios responde al instante, sin quemar créditos de LLM.
+
+## Badge en tu README
+
+Después de auditar un repo en tu instancia:
+
+```markdown
+![VibeCheck](https://tu-instancia.example.com/api/badge/owner/repo.svg)
+```
+
+## VibeCheck en tus Pull Requests
+
+Copia [`docs/vibecheck-action.yml`](docs/vibecheck-action.yml) a `.github/workflows/vibecheck.yml` en cualquier repo, define el secret `VIBECHECK_URL` apuntando a tu instancia, y cada PR recibirá un comentario con su Vibe Score, veredicto y badge.
 
 ## Privacy by design
 
@@ -77,8 +92,10 @@ Los contenidos de los archivos auditados **nunca se persisten**: solo el reporte
 
 ## Roadmap
 
-- [ ] GitHub Action: `vibecheck` como check de PR
-- [ ] Badge SVG embebible (`/api/badge/owner/repo.svg`)
+- [x] CI propia (lint + typecheck + tests + build)
+- [x] Badge SVG embebible (`/api/badge/owner/repo.svg`)
+- [x] Plantilla de GitHub Action para PRs ([docs/vibecheck-action.yml](docs/vibecheck-action.yml))
+- [x] Caché por contenido + rate limiting + progreso real vía stream
 - [ ] OAuth para repos privados
 - [ ] Modo diff: auditar solo lo nuevo desde un tag
 - [ ] CLI (`npx vibecheck`)

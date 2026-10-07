@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────
+# VibeCheck en tus Pull Requests
+#
+# Copia este archivo a .github/workflows/vibecheck.yml en el repo
+# que quieras auditar, y define el secret VIBECHECK_URL con la URL
+# de tu instancia (ej. https://vibecheck.tudominio.com).
+#
+# Cada PR queda auditado: score, veredicto y badge como comentario.
+# ─────────────────────────────────────────────────────────────
+name: VibeCheck
+
+on:
+  pull_request:
+
+permissions:
+  pull-requests: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auditar el PR con VibeCheck
+        env:
+          VIBECHECK_URL: ${{ secrets.VIBECHECK_URL }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          REPO_URL="https://github.com/${{ github.repository }}/tree/${{ github.head_ref || github.ref_name }}"
+          BADGE="${VIBECHECK_URL}/api/badge/${{ github.repository }}.svg"
+
+          RESPONSE=$(curl -sS --max-time 300 -X POST "${VIBECHECK_URL}/api/analyze-repo" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json' \
+            -d "{\"source\":\"github\",\"url\":\"${REPO_URL}\"}")
+
+          SCORE=$(echo "$RESPONSE" | jq -r '.report.score // empty')
+          if [ -z "$SCORE" ]; then
+            ERROR=$(echo "$RESPONSE" | jq -r '.error // "respuesta inválida"')
+            gh pr comment "${{ github.event.pull_request.number }}" \
+              --body "🚨 **VibeCheck no pudo auditar este PR**: ${ERROR}"
+            exit 1
+          fi
+
+          VERDICT=$(echo "$RESPONSE" | jq -r '.report.verdict')
+          SUMMARY=$(echo "$RESPONSE" | jq -r '.report.summary')
+          FILES=$(echo "$RESPONSE" | jq -r '.report.stats.filesAudited')
+
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --body "## 🕵️ VibeCheck: **${SCORE}/100** — ${VERDICT}
+
+          ${SUMMARY}
+
+          ${FILES} archivos auditados a fondo · [badge](${BADGE})
+          > Las auditorías son asistidas por IA: no sustituyen una code review humana."

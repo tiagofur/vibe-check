@@ -28,10 +28,11 @@ import {
   type VibeReport,
 } from '@/lib/vibe-types'
 import type { AnalyzeRepoResponse, RepoCheckHistoryItem, RepoReport } from '@/lib/repo-types'
+import { parseRepoStreamLine } from '@/lib/stream-client'
 import { MiniRing } from '@/components/vibe/score-gauge'
 import { ReportView } from '@/components/vibe/report-view'
 import { RepoReportView } from '@/components/vibe/repo-report-view'
-import { ScanProgress } from '@/components/vibe/scan-progress'
+import { ScanProgress, type LiveProgress } from '@/components/vibe/scan-progress'
 import {
   Bug,
   Factory,
@@ -210,6 +211,7 @@ export default function Home() {
   const [report, setReport] = useState<VibeReport | null>(null)
   const [reportTitle, setReportTitle] = useState('')
   const [repoReport, setRepoReport] = useState<RepoReport | null>(null)
+  const [live, setLive] = useState<LiveProgress | null>(null)
   const [history, setHistory] = useState<AnyHistoryItem[]>([])
   const [historyError, setHistoryError] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -253,39 +255,64 @@ export default function Home() {
     setLoading(true)
     setReport(null)
     setRepoReport(null)
+    setLive(null)
     try {
-      if (tab === 'github') {
-        if (!/github\.com\/[^/\s]+\/[^/\s]+/.test(repoUrl.trim())) {
+      if (tab === 'github' || tab === 'folder') {
+        const payload =
+          tab === 'github'
+            ? { source: 'github' as const, url: repoUrl.trim() }
+            : { source: 'files' as const, title: pickedName || undefined, files: pickedFiles }
+        if (tab === 'github' && !/github\.com\/[^/\s]+\/[^/\s]+/.test(repoUrl.trim())) {
           throw new Error('Ingresa una URL válida: https://github.com/owner/repo')
         }
-        const res = await fetch('/api/analyze-repo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source: 'github', url: repoUrl.trim() }),
-        })
-        const data = (await res.json()) as AnalyzeRepoResponse & { error?: string }
-        if (!res.ok || data.error) throw new Error(data.error || 'Error del servidor')
-        setRepoReport(data.report)
-        toast({
-          title: `${VERDICT_META[data.report.verdict].emoji} ${data.report.repoName} — Vibe Score: ${data.report.score}/100`,
-          description: `Veredicto: ${data.report.verdict}`,
-        })
-      } else if (tab === 'folder') {
-        if (pickedFiles.length === 0) {
+        if (tab === 'folder' && pickedFiles.length === 0) {
           throw new Error('Selecciona o arrastra una carpeta con código primero.')
         }
         const res = await fetch('/api/analyze-repo', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source: 'files', title: pickedName || undefined, files: pickedFiles }),
+          headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+          body: JSON.stringify(payload),
         })
-        const data = (await res.json()) as AnalyzeRepoResponse & { error?: string }
-        if (!res.ok || data.error) throw new Error(data.error || 'Error del servidor')
-        setRepoReport(data.report)
-        toast({
-          title: `${VERDICT_META[data.report.verdict].emoji} Auditoría lista — Vibe Score: ${data.report.score}/100`,
-          description: `Veredicto: ${data.report.verdict}`,
-        })
+
+        if (res.headers.get('content-type')?.includes('x-ndjson') && res.body) {
+          // Progreso real: eventos NDJSON línea a línea
+          const reader = res.body.getReader()
+          const decoder = new TextDecoder()
+          let buffer = ''
+          while (true) {
+            const { value, done } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() ?? ''
+            for (const line of lines) {
+              const ev = parseRepoStreamLine(line)
+              if (!ev) continue
+              if (ev.type === 'progress') {
+                setLive({ phase: ev.phase, pct: ev.pct, message: ev.message })
+              } else if (ev.type === 'error') {
+                throw new Error(ev.error)
+              } else {
+                setRepoReport(ev.report)
+                toast({
+                  title: `${VERDICT_META[ev.report.verdict].emoji} ${ev.report.repoName} — Vibe Score: ${ev.report.score}/100`,
+                  description: ev.cached
+                    ? 'Resultado servido desde caché — sin costo de IA'
+                    : `Veredicto: ${ev.report.verdict}`,
+                })
+              }
+            }
+          }
+        } else {
+          // Respuesta JSON plana (400/429/500 o proxy sin streaming)
+          const data = (await res.json()) as AnalyzeRepoResponse & { error?: string }
+          if (!res.ok || data.error) throw new Error(data.error || 'Error del servidor')
+          setRepoReport(data.report)
+          toast({
+            title: `${VERDICT_META[data.report.verdict].emoji} ${data.report.repoName} — Vibe Score: ${data.report.score}/100`,
+            description: `Veredicto: ${data.report.verdict}`,
+          })
+        }
       } else {
         if (code.trim().length < 10) {
           throw new Error('Pega al menos unas líneas para auditar (mínimo 10 caracteres).')
@@ -314,6 +341,7 @@ export default function Home() {
       })
     } finally {
       setLoading(false)
+      setLive(null)
     }
   }
 
@@ -575,10 +603,10 @@ export default function Home() {
                         </button>{' '}
                         ·{' '}
                         <button
-                          onClick={() => setRepoUrl('https://github.com/octocat/Hello-World')}
+                          onClick={() => setRepoUrl('https://github.com/sindresorhus/pretty-bytes')}
                           className="font-mono text-emerald-400 underline-offset-2 hover:underline"
                         >
-                          octocat/Hello-World
+                          sindresorhus/pretty-bytes
                         </button>
                       </p>
                     </div>
@@ -724,7 +752,11 @@ export default function Home() {
                 </div>
 
                 {loading && (
-                  <ScanProgress mode={tab === 'folder' ? 'files' : tab} language={tab === 'snippet' ? language : undefined} />
+                  <ScanProgress
+                    mode={tab === 'folder' ? 'files' : tab}
+                    language={tab === 'snippet' ? language : undefined}
+                    live={tab === 'snippet' ? null : live}
+                  />
                 )}
               </CardContent>
             </Card>

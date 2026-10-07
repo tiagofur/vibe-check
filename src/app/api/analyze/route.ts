@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
+import { clientKeyFrom, rateLimit } from '@/lib/rate-limit'
 import {
   type Finding,
   type Severity,
@@ -164,6 +165,9 @@ async function callLLM(
   throw new Error('La IA no devolvió respuesta. Inténtalo de nuevo.')
 }
 
+const SNIPPET_AUDITS_PER_HOUR = 20
+const HOUR_MS = 60 * 60 * 1000
+
 export async function POST(req: NextRequest) {
   let body: z.infer<typeof bodySchema>
   try {
@@ -172,6 +176,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: 'Petición inválida. Envía { code, language?, title? }.' },
       { status: 400 },
+    )
+  }
+
+  // Rate limit antes de llamar al LLM: la cuota quemada es de créditos
+  const rl = rateLimit(`snippet-audit:${clientKeyFrom(req)}`, SNIPPET_AUDITS_PER_HOUR, HOUR_MS)
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: `Límite de ${SNIPPET_AUDITS_PER_HOUR} auditorías de snippet por hora alcanzado. Reintenta en ~${Math.ceil(rl.retryAfterSec / 60)} minutos.` },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } },
     )
   }
 
