@@ -1,0 +1,39 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Auditoría de código realizada con VibeCheck
+model VibeCheck {
+  id        String   @id @default(cuid())
+  title     String
+  language  String
+  score     Int
+  verdict   String
+  codeLines Int      @default(0)
+  /// Reporte completo serializado como JSON
+  report    String
+  createdAt DateTime @default(now())
+}
+
+/// Auditoría a nivel repositorio (GitHub público o carpeta local)
+model VibeRepoCheck {
+  id           String   @id @default(cuid())
+  /// owner/repo o nombre de carpeta
+  repoName     String
+  /// 'github' | 'files'
+  source       String
+  branch       String?
+  score        Int
+  verdict      String
+  filesScanned Int      @default(0)
+  filesAudited Int      @default(0)
+  totalLines   Int      @default(0)
+  /// Reporte completo serializado como JSON (sin contenidos de archivos)
+  report       String
+  createdAt    DateTime @default(now())
+}

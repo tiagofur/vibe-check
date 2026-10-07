@@ -1,0 +1,42 @@
+# Worklog
+
+---
+Task ID: 1
+Agent: Z.ai Code (main agent)
+Task: Crear un proyecto open source innovador con IA integrada para la comunidad dev — resultado: "VibeCheck", auditor de código para la era del vibe coding.
+
+Work Log:
+- Analicé la petición y descarté ideas saturadas (code reviewers, generadores de README, chatbots). Elegí un problema NUEVO (2025): la gente sube a producción código generado por IA ("vibe coding") sin revisarlo → alucinaciones, secretos filtrados, bugs sutiles y sobre-ingeniería.
+- Diseñé VibeCheck: auditor con IA que evalúa 4 categorías (security / hallucination / bugs / overengineering) y produce un "Vibe Score" 0-100 con veredicto (SHIP IT / CASI LISTO / SOSPECHOSO / PELIGRO).
+- Cargué el skill LLM y usé z-ai-web-dev-sdk en backend (route handler Node, nunca en cliente).
+- Definí tipos y scoring compartidos en `src/lib/vibe-types.ts` (penalización determinista por severidad + ponderación: security 0.30, hallucination 0.30, bugs 0.25, overengineering 0.15) y 3 snippets de demo en `src/lib/samples.ts` (secretos, alucinaciones, sobre-ingeniería).
+- Schema Prisma: modelo `VibeCheck` (id, title, language, score, verdict, codeLines, report JSON, createdAt) reemplazando modelos scaffold; `bun run db:push` OK.
+- Backend: `POST /api/analyze` (validación zod, truncado a 12k chars, prompt de sistema estricto con JSON-only, extracción robusta de JSON con reintentos, normalización defensiva de findings, techo duro de score si hay críticos en security/hallucination → PELIGRO, guardado en DB), `GET /api/checks` (historial), `GET/DELETE /api/checks/[id]`.
+- Frontend (dark theme con esmeralda/violeta/ámbar, sin azules): hero con terminal que escribe en vivo, analizador con textarea + drag&drop de archivos + select de lenguaje + 3 ejemplos, ScanProgress con pasos animados, ReportView (gauge SVG animado con gradiente rojo→esmeralda, MiniRings por categoría, accordions de hallazgos con fix sugerido, visor de código con líneas marcadas por severidad y salto a línea), historial con carga/eliminación, sección "Cómo funciona", footer sticky (mt-auto + safe-area).
+- Corregí durante la verificación: (1) botones anidados dentro de AccordionTrigger → chips de línea convertidos a span[role=button] con soporte de teclado; (2) calibración indulgente del score (62 "CASI LISTO" con SQL injection) → techo de 35 con críticos de security/hallucination.
+- Verificación end-to-end con Agent Browser: render OK sin errores de consola, 2 auditorías reales con LLM (23.2s y 20.6s) que detectaron TODAS las alucinaciones plantadas (redis-super-cache-pro, formatDateES, measureMemory, Sentry.captureMetrics, Array.chunk) y los secretos, salto a línea L7 resaltando el STRIPE_KEY, historial 3→2 al eliminar, responsive móvil 390px OK, footer OK, lint limpio, dev.log sin errores.
+
+Stage Summary:
+- App completa y verificada en `/` (única ruta visible): VibeCheck, auditor IA open source (MIT) para vibe coding.
+- Artefactos clave: `src/lib/vibe-types.ts`, `src/lib/samples.ts`, `src/app/api/analyze/route.ts`, `src/app/api/checks/route.ts`, `src/app/api/checks/[id]/route.ts`, `src/components/vibe/score-gauge.tsx`, `src/components/vibe/report-view.tsx`, `src/components/vibe/scan-progress.tsx`, `src/app/page.tsx`, `prisma/schema.prisma` (modelo VibeCheck), layout con metadata/lang es, globals.css con utilidades (scrollbar-thin, vibe-scan, vibe-cursor).
+- Decisiones: scoring determinista calculado en backend (no por el LLM) para consistencia; el código del usuario NO se persiste (privacy by design, solo el reporte); techo duro de veredicto ante críticos.
+
+---
+Task ID: 2
+Agent: Z.ai Code (main agent)
+Task: Pivotar VibeCheck de "auditor de snippets" a "auditor adversarial a nivel repositorio" (GitHub públicos + carpetas locales), tras el feedback del usuario sobre utilidad real y competencia (Claude Code / Codex).
+
+Work Log:
+- Definí el posicionamiento: due diligence independiente pre-clonación vs asistencia in-session de los IDEs IA. Diferenciadores: grafo de imports de TODO el repo, chequeos estructurales deterministas (reproducibles, sin LLM) y detección de alucinaciones cross-file.
+- Prisma: nuevo modelo `VibeRepoCheck` (repoName, source, branch, score, verdict, filesScanned, filesAudited, totalLines, report JSON). db:push OK.
+- `src/lib/repo-scan.ts` (motor determinista, cero LLM): filtro de árbol (skip dirs pesados/binarios/locks), riskScore por keywords (auth>pagos>secrets>db>api), extracción de imports JS/TS/Python, resolución de imports relativos con extensiones/index, chequeo de dependencias fantasma vs package.json (con excepción de auto-import del propio paquete), deps sin uso, secretos por patrones (AWS/Stripe/GitHub/Slack/BD con password/credenciales genéricas), .env commiteado, archivos huérfanos (sin inbound edges).
+- `src/lib/repo-llm.ts` (orquestación IA): selectAuditFiles (triage top-32 por riesgo + hasta 3 tests + manifiesto, lotes ≤13k chars × 3), auditBatch (JSON estricto por lote con file/lines/severity/category), synthesizeReport (reduce: summary, architecture, vibeSignals, topRisks, categorySummaries). Salvamento de JSON truncado del LLM (recorta al último hallazgo completo y cierra el array).
+- `POST /api/analyze-repo`: ingesta GitHub vía **tarball de codeload** (sin límites de la API de 60/h; probé API primero y la IP del sandbox la tenía agotada → refactor), extracción con tar + validación anti zip-slip, caps (40MB, 120 archivos leídos, 40KB/archivo); modo `files` (carpeta local) con mismos caps; merge scan+IA por categoría nativa (`RepoFinding.category`), scoring determinista con techos (crítico security/hallucination → ≤35), guardado en DB. `/api/repo-checks` + `/api/repo-checks/[id]` (GET/DELETE).
+- UI: Tabs Repo GitHub / Carpeta local / Snippet (snippet se conserva); input URL con quick-links, zona de arrastre de carpetas con traversing real de entries (webkitGetAsEntry) + input webkitdirectory; ScanProgress con fases por modo; `RepoReportView` (gauge, chequeos estructurales con estados pass/warn/fail, riesgos principales, "¿Huele a vibe coding?" con señales, 4 categorías, hallazgos agrupados por archivo con filtro y badge "verificado" para hallazgos deterministas, copiar MD); historial unificado snippet+repo con iconos por fuente.
+- Bugs corregidos durante la build: backticks anidados en template literal (parse error), icono lucide `ScanFolder` inexistente → `FolderSearch`, singleton de Prisma obsoleto tras db:push (reinicio del dev server), falso positivo de dependencia fantasma con auto-import del propio paquete (sindresorhus/slugify: 80→93), restauración accidental de `importedPkgs.add`.
+- Verificación E2E: repo sintético "vibe-coded" por carpeta → detectó TODO lo plantado (left-pad-x fantasma, ./billing/pagos roto, 3 secretos, .env, lodash muerto, huérfano) con score 35 PELIGRO y persistencia OK; repo real sindresorhus/slugify desde la UI → 12 archivos escaneados, 11 auditados con IA, 1257 líneas, score 93-98 SHIP IT; historial unificado con 4 entradas; responsive móvil OK; lint limpio.
+
+Stage Summary:
+- VibeCheck 2.0: auditoría a nivel repo con motor determinista (grafo de imports + manifiesto + secretos, reproducible) + auditoría IA por lotes con triage de riesgo. GitHub públicos sin API keys (tarball), carpetas locales por drag&drop/webkitdirectory, snippet conservado.
+- Artefactos: `src/lib/repo-types.ts`, `src/lib/repo-scan.ts`, `src/lib/repo-llm.ts`, `src/app/api/analyze-repo/route.ts`, `src/app/api/repo-checks/*`, `src/components/vibe/repo-report-view.tsx`, `scan-progress.tsx` (modos), `page.tsx` (tabs + carpetas), `prisma/schema.prisma` (+VibeRepoCheck).
+- Límites conocidos: 120 archivos leídos/220 escaneados por run (árbol completo para el grafo), repos >40MB comprimidos no soportados, privados requieren token (próximo paso natural: OAuth con NextAuth), sin CI yet (GitHub Action sería el siguiente hito).
