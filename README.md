@@ -1,10 +1,11 @@
 # VibeCheck
 
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/tiagofur)
 [![CI](https://github.com/tiagofur/vibe-check/actions/workflows/ci.yml/badge.svg)](https://github.com/tiagofur/vibe-check/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
 [![Tests](https://img.shields.io/badge/tests-43%20passing-emerald)](tests)
+
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/tiagofur)
 
 > **Adversarial due diligence for repositories in the vibe coding era.** Did an AI write that repo at 3 AM? Find out **before you clone**.
 
