@@ -31,6 +31,6 @@ export async function GET() {
     return NextResponse.json({ checks: items })
   } catch (error) {
     console.error('[vibecheck] history fetch failed:', error)
-    return NextResponse.json({ checks: [] })
+    return NextResponse.json({ error: 'Historial no disponible: no se pudo leer la base de datos' }, { status: 503 })
   }
 }

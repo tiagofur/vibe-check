@@ -32,8 +32,13 @@ export function selectAuditFiles(
   const testFiles = ranked.filter((f) => /test|spec/i.test(f.path)).slice(0, 3)
   const pool: RepoFile[] = []
   const seen = new Set<string>()
+  let overflow = 0 // elegibles que quedan fuera por el techo MAX_AUDIT_FILES
   const push = (f: RepoFile) => {
-    if (seen.has(f.path) || pool.length >= MAX_AUDIT_FILES) return
+    if (seen.has(f.path)) return
+    if (pool.length >= MAX_AUDIT_FILES) {
+      overflow++
+      return
+    }
     seen.add(f.path)
     pool.push(f)
   }
@@ -65,7 +70,7 @@ export function selectAuditFiles(
   return {
     batches,
     auditedPaths: batches.flat().map((f) => f.path),
-    truncated: pool.length > batches.reduce((n, b) => n + b.length, 0),
+    truncated: overflow > 0 || pool.length > batches.reduce((n, b) => n + b.length, 0),
   }
 }
 

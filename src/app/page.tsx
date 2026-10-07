@@ -211,6 +211,7 @@ export default function Home() {
   const [reportTitle, setReportTitle] = useState('')
   const [repoReport, setRepoReport] = useState<RepoReport | null>(null)
   const [history, setHistory] = useState<AnyHistoryItem[]>([])
+  const [historyError, setHistoryError] = useState(false)
   const [dragOver, setDragOver] = useState(false)
 
   const analyzerRef = useRef<HTMLDivElement>(null)
@@ -225,6 +226,7 @@ export default function Home() {
   const fetchHistory = useCallback(async () => {
     try {
       const [snipRes, repoRes] = await Promise.all([fetch('/api/checks'), fetch('/api/repo-checks')])
+      if (!snipRes.ok || !repoRes.ok) throw new Error('historial no disponible')
       const snipData = await snipRes.json()
       const repoData = await repoRes.json()
       const merged: AnyHistoryItem[] = [
@@ -233,8 +235,10 @@ export default function Home() {
       ]
       merged.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       setHistory(merged.slice(0, 20))
+      setHistoryError(false)
     } catch {
-      /* historial silencioso */
+      setHistory([])
+      setHistoryError(true)
     }
   }, [])
 
@@ -751,7 +755,30 @@ export default function Home() {
               Actualizar
             </Button>
           </div>
-          {history.length === 0 ? (
+          {historyError ? (
+            <Card className="border-amber-500/40 bg-amber-500/5">
+              <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
+                <Radar className="size-8 text-amber-400/70" aria-hidden />
+                <div>
+                  <p className="text-sm font-medium text-amber-300">Historial no disponible</p>
+                  <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+                    No se pudo leer la base de datos local. Revisa{' '}
+                    <code className="font-mono text-xs text-foreground/80">DATABASE_URL</code> en tu{' '}
+                    <code className="font-mono text-xs text-foreground/80">.env</code> y ejecuta{' '}
+                    <code className="font-mono text-xs text-foreground/80">bun run db:push</code>.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={fetchHistory}
+                  className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10 hover:text-amber-200"
+                >
+                  Reintentar
+                </Button>
+              </CardContent>
+            </Card>
+          ) : history.length === 0 ? (
             <Card className="border-dashed bg-zinc-900/40">
               <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
                 <Radar className="size-8 text-muted-foreground/50" aria-hidden />

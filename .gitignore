@@ -33,6 +33,8 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example
+# los fixtures de tests llevan un .env plantado a propósito
+!tests/fixtures/**/*
 
 # base de datos sqlite local (historial de auditorías)
 /db/*
@@ -59,3 +61,5 @@ prompt
 server.log
 # Skills directory
 /skills/
+# sqlite sueltas generadas por pruebas
+*.db

@@ -53,6 +53,7 @@ bun run dev
 | `bun run dev` | Servidor de desarrollo en :3000 |
 | `bun run build` / `bun run start` | Build standalone de producción / arranque |
 | `bun run lint` / `bun run typecheck` | ESLint / `tsc --noEmit` |
+| `bun run test` / `bun run test:watch` | Suite de tests del motor (Vitest) |
 | `bun run db:push` / `db:generate` | Sincroniza el schema Prisma / regenera el cliente |
 
 ## API
@@ -84,7 +85,9 @@ Los contenidos de los archivos auditados **nunca se persisten**: solo el reporte
 
 ## Contribuir
 
-El mejor ejemplo de uso es auditar al propio auditor: clona, corre `bun run lint && bun run typecheck` y mira `src/lib/repo-scan.ts` — el motor determinista es puro y fácil de extender con nuevos chequeos.
+El mejor ejemplo de uso es auditar al propio auditor: clona, corre `bun run lint && bun run typecheck && bun run test` y mira `src/lib/repo-scan.ts` — el motor determinista es puro y fácil de extender con nuevos chequeos.
+
+El repo `tests/fixtures/vibe-coded-repo/` es un mini-proyecto "vibe-coded" con defectos plantados (secretos ficticios, deps fantasma, huérfanos): la suite exige que el scanner los detecte **todos**, así que ningún chequeo puede regresar en silencio. Si agregas un chequeo nuevo, plántalo ahí primero.
 
 ## Licencia
 
