@@ -464,7 +464,9 @@ export default function Home() {
               Analizador
             </Button>
             <a
-              href="#"
+              href="https://github.com/tiagofur/vibe-check"
+              target="_blank"
+              rel="noreferrer"
               className="inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <Github className="size-4" aria-hidden /> GitHub
@@ -967,11 +969,30 @@ export default function Home() {
               </div>
             </div>
             <nav className="flex items-center gap-4 text-sm text-muted-foreground" aria-label="Enlaces del proyecto">
-              <a href="#" className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground">
+              <a
+                href="https://github.com/tiagofur/vibe-check"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground"
+              >
                 <Github className="size-4" aria-hidden /> Repositorio
               </a>
-              <a href="#" className="transition-colors hover:text-foreground">Issues</a>
-              <a href="#" className="transition-colors hover:text-foreground">Contribuir</a>
+              <a
+                href="https://github.com/tiagofur/vibe-check/issues"
+                target="_blank"
+                rel="noreferrer"
+                className="transition-colors hover:text-foreground"
+              >
+                Issues
+              </a>
+              <a
+                href="https://github.com/tiagofur/vibe-check#contribuir"
+                target="_blank"
+                rel="noreferrer"
+                className="transition-colors hover:text-foreground"
+              >
+                Contribuir
+              </a>
             </nav>
           </div>
           <p className="mt-6 text-center text-[11px] leading-relaxed text-muted-foreground/70">

@@ -29,7 +29,7 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: "Comunidad VibeCheck" }],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/favicon.svg",
   },
   openGraph: {
     title: "VibeCheck — ¿La IA escribió tu código?",
