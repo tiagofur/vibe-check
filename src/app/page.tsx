@@ -205,6 +205,8 @@ export default function Home() {
   const [language, setLanguage] = useState('auto')
   const [title, setTitle] = useState('')
   const [repoUrl, setRepoUrl] = useState('')
+  const [baseRef, setBaseRef] = useState('')
+  const [ghToken, setGhToken] = useState('')
   const [pickedFiles, setPickedFiles] = useState<{ path: string; content: string }[]>([])
   const [pickedName, setPickedName] = useState('')
   const [loading, setLoading] = useState(false)
@@ -260,7 +262,12 @@ export default function Home() {
       if (tab === 'github' || tab === 'folder') {
         const payload =
           tab === 'github'
-            ? { source: 'github' as const, url: repoUrl.trim() }
+            ? {
+                source: 'github' as const,
+                url: repoUrl.trim(),
+                base: baseRef.trim() || undefined,
+                token: ghToken.trim() || undefined,
+              }
             : { source: 'files' as const, title: pickedName || undefined, files: pickedFiles }
         if (tab === 'github' && !/github\.com\/[^/\s]+\/[^/\s]+/.test(repoUrl.trim())) {
           throw new Error('Ingresa una URL válida: https://github.com/owner/repo')
@@ -587,9 +594,27 @@ export default function Home() {
                         if (e.key === 'Enter' && !loading) analyze()
                       }}
                     />
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Input
+                        value={baseRef}
+                        onChange={(e) => setBaseRef(e.target.value)}
+                        placeholder="🔀 Modo diff (opcional): v1.2.0 — audita solo los cambios desde este tag/rama/sha"
+                        className="bg-zinc-950/60 font-mono text-xs"
+                        aria-label="Ref base para modo diff"
+                      />
+                      <Input
+                        type="password"
+                        value={ghToken}
+                        onChange={(e) => setGhToken(e.target.value)}
+                        placeholder="🔑 Token PAT (opcional, repos privados) — nunca se guarda"
+                        className="bg-zinc-950/60 font-mono text-xs"
+                        aria-label="Token de acceso personal de GitHub"
+                        autoComplete="off"
+                      />
+                    </div>
                     <div className="rounded-lg border border-border bg-zinc-950/40 p-3 text-xs leading-relaxed text-muted-foreground">
                       <p className="flex flex-wrap gap-x-4 gap-y-1">
-                        <span>🐙 <span className="text-foreground/80">Públicos por ahora</span> — privados necesitarán token</span>
+                        <span>🐙 <span className="text-foreground/80">Públicos y privados</span> — privados con token scope repo (o GITHUB_TOKEN en el servidor)</span>
                         <span>🧠 Triage: los {`~30`} archivos de mayor riesgo se auditan a fondo</span>
                         <span>🧪 Grafo de imports sobre el árbol completo</span>
                       </p>

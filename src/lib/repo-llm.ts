@@ -231,6 +231,8 @@ export async function synthesizeReport(
     aiFindings: RepoFinding[]
     stats: { filesScanned: number; filesAudited: number; totalLines: number; languages: string[]; truncated: boolean }
     externalUsed: string[]
+    /** Presente en modo diff: solo se puntúan los archivos cambiados */
+    diff?: { base: string; changed: number }
   },
 ): Promise<ReduceResult> {
   const compact = (fs: RepoFinding[]) =>
@@ -245,7 +247,7 @@ export async function synthesizeReport(
 
   const user = `Repo: ${ctx.repoName}${ctx.branch ? ` (rama ${ctx.branch})` : ''}${ctx.stars !== null ? ` · ${ctx.stars} stars` : ''}
 Stats: ${ctx.stats.filesScanned} archivos escaneados, ${ctx.stats.filesAudited} auditados a fondo, ${ctx.stats.totalLines} líneas, lenguajes: ${ctx.stats.languages.join(', ') || 'n/d'}${ctx.stats.truncated ? ' (árbol truncado)' : ''}
-Paquetes externos usados: ${ctx.externalUsed.slice(0, 40).join(', ') || 'ninguno'}
+${ctx.diff ? `MODO DIFF: esta auditoría cubre SOLO los ${ctx.diff.changed} archivos cambiados desde "${ctx.diff.base}". Enfoca summary, riesgos y señales en los cambios.\n` : ''}Paquetes externos usados: ${ctx.externalUsed.slice(0, 40).join(', ') || 'ninguno'}
 
 Árbol (recortado):
 ${ctx.treePreview.slice(0, 100).join('\n')}

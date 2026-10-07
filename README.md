@@ -68,6 +68,26 @@ bun run dev
 
 **Caché por contenido**: cada repo se audita una única vez por versión — la clave es el sha256 del tarball descargado (o de la carpeta). Re-auditar el mismo repo sin cambios responde al instante, sin quemar créditos de LLM.
 
+### Modo diff: el gate de regresión
+
+En la pestaña de GitHub, escribe un **tag, rama o sha** en el campo "Modo diff": VibeCheck descarga ambos árboles, calcula qué cambió, y **audita y puntúa solo los archivos cambiados** (el grafo de imports y los chequeos estructurales siguen viendo el repo completo). Un PR que toca solo un archivo se audita en segundos y su score refleja exactamente lo que ese PR introduce. Hallazgos pre-existentes en código no cambiado se excluyen del score (y el reporte indica cuántos).
+
+### Repos privados
+
+Pega un **Personal Access Token** (scope `repo`) en el campo de token: se usa solo para esa auditoría y nunca se persiste. Alternativa de servidor: define `GITHUB_TOKEN` en el entorno de tu instancia y todos los downloads lo usarán.
+
+### CLI: audita sin servidor
+
+El motor determinista corre local, sin LLM ni base de datos:
+
+```bash
+bun cli.ts ./mi-proyecto            # reporte legible
+bun cli.ts ./mi-proyecto --json     # salida para CI
+echo $?                             # 1 si el veredicto es SOSPECHOSO o PELIGRO
+```
+
+Útil como gate rápido en CI o para auditar antes de subir. La auditoría completa (IA, diff, caché) sigue disponible en la app web.
+
 ## Badge en tu README
 
 Después de auditar un repo en tu instancia:
@@ -96,9 +116,12 @@ Los contenidos de los archivos auditados **nunca se persisten**: solo el reporte
 - [x] Badge SVG embebible (`/api/badge/owner/repo.svg`)
 - [x] Plantilla de GitHub Action para PRs ([docs/vibecheck-action.yml](docs/vibecheck-action.yml))
 - [x] Caché por contenido + rate limiting + progreso real vía stream
-- [ ] OAuth para repos privados
-- [ ] Modo diff: auditar solo lo nuevo desde un tag
-- [ ] CLI (`npx vibecheck`)
+- [x] Modo diff: auditar y puntuar solo los cambios desde un tag/rama/sha
+- [x] Repos privados vía PAT (por petición o `GITHUB_TOKEN` del servidor)
+- [x] CLI determinista local (`bun cli.ts`)
+- [ ] OAuth de GitHub (token por sesión sin pegar PATs)
+- [ ] Modo diff también para carpetas locales (contra un snapshot guardado)
+- [ ] Publicar el CLI en npm (`npx vibecheck`)
 
 ## Contribuir
 

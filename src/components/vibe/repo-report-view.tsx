@@ -26,6 +26,7 @@ import {
   FileCode2,
   FolderGit2,
   GitBranch,
+  GitCompare,
   Github,
   Radar,
   Siren,
@@ -169,6 +170,16 @@ export function RepoReportView({
                   <Badge variant="outline" className={`${verdict.classes} px-4 py-1.5 text-sm font-semibold`}>
                     {verdict.emoji} {report.verdict}
                   </Badge>
+                  {report.diff && (
+                    <Badge
+                      variant="outline"
+                      className="gap-1.5 border-violet-500/40 text-xs text-violet-300"
+                      title={`Score calculado solo sobre los archivos cambiados desde ${report.diff.base}; ${report.diff.excludedFindings} hallazgo(s) pre-existente(s) excluido(s)`}
+                    >
+                      <GitCompare className="size-3.5" aria-hidden /> diff vs {report.diff.base} · +
+                      {report.diff.filesAdded} ~{report.diff.filesModified} −{report.diff.filesDeleted}
+                    </Badge>
+                  )}
                   {report.source === 'github' ? (
                     <Badge variant="outline" className="gap-1.5 border-border text-xs text-muted-foreground">
                       <Github className="size-3.5" aria-hidden /> repo público

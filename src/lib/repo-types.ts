@@ -42,6 +42,15 @@ export interface RepoReport {
     languages: string[]
     truncated: boolean
   }
+  /** Presente cuando se auditó en modo diff (solo los cambios vs un ref base) */
+  diff?: {
+    base: string
+    filesAdded: number
+    filesModified: number
+    filesDeleted: number
+    /** Hallazgos pre-existentes excluidos del score por tocar código no cambiado */
+    excludedFindings: number
+  }
   vibeSignals: { title: string; detail: string }[]
   topRisks: { title: string; detail: string; severity: Severity }[]
   structural: StructuralCheck[]

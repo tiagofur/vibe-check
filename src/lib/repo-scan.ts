@@ -7,7 +7,7 @@
 import type { RepoFile, RepoFinding } from './repo-types'
 import type { CategoryKey, Severity } from './vibe-types'
 
-const SKIP_DIRS = new Set([
+export const SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', 'out', 'coverage', '.next',
   'vendor', '__pycache__', '.venv', 'venv', 'target', '.idea', '.vscode',
   'bin', 'obj', '.turbo', '.cache',
