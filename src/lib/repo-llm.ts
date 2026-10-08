@@ -3,7 +3,7 @@
 // Estrategia: triage determinista → auditoría por lotes → síntesis.
 // ─────────────────────────────────────────────────────────────
 
-import type ZAI from 'z-ai-web-dev-sdk'
+import type { ChatMessage, LlmClient } from './llm'
 import type { RepoFile, RepoFinding } from './repo-types'
 import type { CategoryKey, Severity } from './vibe-types'
 import { riskScore } from './repo-scan'
@@ -12,8 +12,6 @@ const MAX_BATCH_CHARS = 13000
 const MAX_FILES_PER_BATCH = 12
 const MAX_BATCHES = 3
 const MAX_AUDIT_FILES = 32
-
-type ChatMessage = { role: 'assistant' | 'user'; content: string }
 
 export interface AuditSelection {
   batches: RepoFile[][]
@@ -141,18 +139,13 @@ function salvagePartialFindings(text: string): Record<string, unknown> | null {
   return null
 }
 
-async function chatJSON(zai: Awaited<ReturnType<typeof ZAI.create>>, messages: ChatMessage[]): Promise<Record<string, unknown>> {
-  const completion = await zai.chat.completions.create({
-    messages,
-    thinking: { type: 'disabled' },
-  })
-  const content = completion.choices[0]?.message?.content
-  if (!content) throw new Error('La IA no devolvió respuesta')
+async function chatJSON(llm: LlmClient, messages: ChatMessage[]): Promise<Record<string, unknown>> {
+  const content = await llm.complete(messages)
   return extractJson(content)
 }
 
 export async function auditBatch(
-  zai: Awaited<ReturnType<typeof ZAI.create>>,
+  llm: LlmClient,
   treePreview: string[],
   batch: RepoFile[],
 ): Promise<RawAIFinding[]> {
@@ -161,7 +154,7 @@ export async function auditBatch(
     .join('\n\n')
   const user = `Árbol del repo (contexto, recortado):\n${treePreview.slice(0, 80).join('\n')}\n\nArchivos a auditar en este lote:\n\n${filesText}`
   try {
-    const parsed = await chatJSON(zai, [
+    const parsed = await chatJSON(llm, [
       { role: 'assistant', content: AUDIT_SYSTEM },
       { role: 'user', content: user },
     ])
@@ -221,7 +214,7 @@ JSON EXCLUSIVO:
 {"summary":"...","architecture":"...","vibeSignals":[{"title":"...","detail":"..."}],"topRisks":[{"title":"...","detail":"...","severity":"critical|high|medium|low|info"}],"categorySummaries":{"security":"...","hallucination":"...","bugs":"...","overengineering":"..."}}`
 
 export async function synthesizeReport(
-  zai: Awaited<ReturnType<typeof ZAI.create>>,
+  llm: LlmClient,
   ctx: {
     repoName: string
     branch: string | null
@@ -259,7 +252,7 @@ Hallazgos auditoría IA:
 ${JSON.stringify(compact(ctx.aiFindings))}`
 
   try {
-    const parsed = await chatJSON(zai, [
+    const parsed = await chatJSON(llm, [
       { role: 'assistant', content: REDUCE_SYSTEM },
       { role: 'user', content: user },
     ])

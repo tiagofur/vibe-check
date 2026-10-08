@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
 import { clientKeyFrom, rateLimit } from '@/lib/rate-limit'
+import { getLLM, type LlmClient } from '@/lib/llm'
 import {
   type RepoFile,
   type RepoFinding,
@@ -473,12 +473,21 @@ async function runAudit(
   const aiRaw: RepoFinding[] = []
   let engine: 'ia' | 'determinista' = 'ia'
   let auditedPaths: string[] = []
-  let zai: Awaited<ReturnType<typeof ZAI.create>> | null = null
+  let llm: LlmClient | null = null
   try {
-    zai = await ZAI.create()
+    llm = await getLLM()
   } catch (aiError) {
     engine = 'determinista'
-    console.error('[vibecheck] IA no disponible — reporte solo con el motor determinista:', aiError)
+    console.error('[vibecheck] configuración de IA inválida — reporte solo con el motor determinista:', aiError)
+    emit({
+      type: 'progress',
+      phase: 'ia',
+      pct: 45,
+      message: 'Configuración de IA inválida — redactando con el motor determinista (reproducible)…',
+    })
+  }
+  if (!llm && engine === 'ia') {
+    engine = 'determinista'
     emit({
       type: 'progress',
       phase: 'ia',
@@ -487,7 +496,7 @@ async function runAudit(
     })
   }
 
-  if (zai) {
+  if (llm) {
     const selection = selectAuditFiles(auditPool, scan.checks.manifestName)
     auditedPaths = selection.auditedPaths
     const totalBatches = selection.batches.length
@@ -498,9 +507,9 @@ async function runAudit(
         type: 'progress',
         phase: 'ia',
         pct: 30 + Math.round(40 * (i / Math.max(1, totalBatches))),
-        message: `Auditando con IA: lote ${i + 1} de ${totalBatches} (${batch.length} archivos${changed ? ' cambiados' : ' críticos'})…`,
+        message: `Auditando con IA (${llm.provider} · ${llm.model}): lote ${i + 1} de ${totalBatches} (${batch.length} archivos${changed ? ' cambiados' : ' críticos'})…`,
       })
-      const raw = await auditBatch(zai, treePreview, batch)
+      const raw = await auditBatch(llm, treePreview, batch)
       for (const f of raw) {
         aiRaw.push({ ...f, origin: 'ai' })
       }
@@ -515,8 +524,8 @@ async function runAudit(
     message: engine === 'ia' ? 'Redactando el veredicto del repo…' : 'Veredicto determinista del repo…',
   })
   let reduced: ReduceResult | null = null
-  if (zai) {
-    reduced = await synthesizeReport(zai, {
+  if (llm) {
+    reduced = await synthesizeReport(llm, {
       repoName,
       branch,
       stars,

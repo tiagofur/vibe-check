@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
 import { clientKeyFrom, rateLimit } from '@/lib/rate-limit'
+import { getLLM, type LlmClient } from '@/lib/llm'
 import {
   type Finding,
   type Severity,
@@ -127,7 +127,7 @@ function buildReport(parsed: Record<string, unknown>): VibeReport {
 }
 
 async function callLLM(
-  zai: Awaited<ReturnType<typeof ZAI.create>>,
+  llm: LlmClient,
   code: string,
   language: string,
   wasTruncated: boolean,
@@ -149,11 +149,7 @@ async function callLLM(
             : `${userPrompt}\n\nIMPORTANTE: tu respuesta anterior no fue JSON válido. Responde ÚNICAMENTE con el objeto JSON, sin ningún texto adicional.`,
       },
     ]
-    const completion = await zai.chat.completions.create({
-      messages,
-      thinking: { type: 'disabled' },
-    })
-    const content = completion.choices[0]?.message?.content
+    const content = await llm.complete(messages)
     if (content && content.trim().length > 0) {
       try {
         return extractJson(content)
@@ -197,8 +193,17 @@ export async function POST(req: NextRequest) {
     'Snippet sin título'
 
   try {
-    const zai = await ZAI.create()
-    const parsed = await callLLM(zai, finalCode, body.language, wasTruncated)
+    const llm = await getLLM()
+    if (!llm) {
+      return NextResponse.json(
+        {
+          error:
+            'IA no configurada en esta instancia. Define una API key (GEMINI_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, ZAI_API_KEY u OLLAMA_MODEL) o usa el auditor de repos, que funciona sin IA.',
+        },
+        { status: 503 },
+      )
+    }
+    const parsed = await callLLM(llm, finalCode, body.language, wasTruncated)
     const report = buildReport(parsed)
     const codeLines = code.split('\n').length
 

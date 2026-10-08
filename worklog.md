@@ -132,3 +132,18 @@ Work Log:
 
 Stage Summary:
 - Un proyecto Next.js sano con @/* ya no recibe −288 puntos inventados: el grafo garantiza manifiesto+tsconfig, resuelve contra el árbol completo y se niega a afirmar lo que la muestra no alcanza a probar. La credibilidad del auditor (cero falsos positivos de resolvedor) era el bug #1 del producto.
+
+---
+Task ID: 8
+Agent: ZCode (GLM)
+Task: Capa LLM multi-provider con trae-tu-propia-key (Gemini AI Studio, OpenRouter, OpenAI, Anthropic, Z.ai/GLM, Ollama local) — reemplaza el acoplamiento al SDK z-ai-web-dev-sdk.
+
+Work Log:
+- src/lib/llm.ts (nuevo): cliente único OpenAI-compatible en fetch puro (cero deps). SPECS por provider (endpoint, default model del tier económico, headers, thinking/max_tokens). buildChatRequest/parseChatResponse puros y testeables; normaliza el primer mensaje 'assistant' (quirk del SDK legacy) a 'system' para todos los providers. getLLM(): LLM_PROVIDER explícito (o 'none' para apagar) → auto-detección por presencia de key (gemini → openrouter → openai → anthropic → zai → ollama) → SDK legacy (.z-ai-config) como último recurso → null = modo determinista intacto. Overrides: LLM_MODEL global, LLM_BASE_URL (proxies/gateways), modelEnv/baseUrlEnv por provider (OLLAMA_MODEL/ZAI_BASE_URL). Timeouts 120s y errores HTTP con detalle accionable.
+- Providers: Gemini AI Studio (gemini-2.5-flash), OpenRouter (google/gemini-2.5-flash + attribution headers), OpenAI (gpt-5-mini), Anthropic vía capa compat OpenAI (claude-haiku-4-5, x-api-key + anthropic-version + max_tokens 8192), Z.ai directo api.z.ai (glm-4.6, thinking disabled), Ollama local (sin key, requiere OLLAMA_MODEL).
+- Refactor: repo-llm.ts (chatJSON/auditBatch/synthesizeReport toman LlmClient, sin tipo ZAI), analyze/route.ts (503 con mensaje accionable si no hay IA configurada) y analyze-repo/route.ts (el progreso NDJSON ahora anuncia provider·modelo; configuración inválida cae a determinista).
+- .env.example extendido (todas las keys + overrides comentados); READMEs bilingües: sección "Bring your own key" con tabla provider/default/por qué; keys solo server-side.
+- Tests: tests/llm.test.ts (18) — wire format por provider (system normalizado, thinking solo en GLM, headers Anthropic/OpenRouter, override LLM_BASE_URL), parseo, y matriz de selección (auto-orden, explícito gana, none apaga, inválido/sin key lanzan, ollama por modelEnv, LLM_MODEL). Smoke E2E con Bun.serve mock: petición (auth/model/system) y parseo verificados contra endpoint local. 132 tests en verde; tsc/eslint/build limpios.
+
+Stage Summary:
+- VibeCheck deja de depender del sandbox Z.ai para tener IA: cualquier key de Gemini/OpenRouter/OpenAI/Anthropic/GLM/Ollama enciende el auditor completo, con defaults baratos y fallback determinista siempre de por medio. La Action de PR (docs/vibecheck-action.yml) ahora es desplegable con una sola GEMINI_API_KEY en la instancia.

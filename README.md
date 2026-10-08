@@ -73,7 +73,7 @@ Real audits: `sindresorhus/slugify` scores **98/100 SHIP IT** (note the trend sp
 
 ### Quick start
 
-Requirements: [Bun](https://bun.sh) (or Node 20+), and `z-ai-web-dev-sdk` credentials for the AI backend.
+Requirements: [Bun](https://bun.sh) (or Node 20+). AI is optional — without keys the app runs in deterministic mode.
 
 ```bash
 git clone https://github.com/tiagofur/vibe-check.git
@@ -90,7 +90,22 @@ bun run db:generate && bun run db:push
 bun run dev
 ```
 
-> The AI SDK (`z-ai-web-dev-sdk`) is configured per its own docs (`.z-ai-config` file); it is never used client-side. Without credentials the web app **falls back to deterministic-only reports** automatically (see the ⚡ badge on the report) — and the CLI never needed it.
+> Without credentials the web app **falls back to deterministic-only reports** automatically (see the ⚡ badge on the report) — and the CLI never needed any.
+
+#### Bring your own key (optional)
+
+The AI layer speaks the OpenAI chat-completions dialect and auto-detects the first provider with credentials. All defaults are each provider's budget tier; override any model with `LLM_MODEL`.
+
+| Key (env) | Provider | Default model | Why |
+|---|---|---|---|
+| `GEMINI_API_KEY` | Google AI Studio | `gemini-2.5-flash` | Generous free tier, cheap flash tier |
+| `OPENROUTER_API_KEY` | OpenRouter | `google/gemini-2.5-flash` | One key, hundreds of models |
+| `OPENAI_API_KEY` | OpenAI | `gpt-5-mini` | The cheap "mini" tier |
+| `ANTHROPIC_API_KEY` | Anthropic | `claude-haiku-4-5` | Haiku: fast and cheap |
+| `ZAI_API_KEY` | Z.ai (GLM) | `glm-4.6` | Same model family as the original SDK |
+| `OLLAMA_MODEL` | Ollama (local) | — | Your code never leaves the machine |
+
+Extras: `LLM_PROVIDER` forces a provider (`none` disables AI), `LLM_BASE_URL` points at a proxy/gateway, and the legacy `.z-ai-config` SDK still works as a last-resort fallback. Keys are read server-side only and never sent to the browser.
 
 | Command | What it does |
 |---|---|
