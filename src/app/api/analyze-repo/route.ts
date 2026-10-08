@@ -388,6 +388,16 @@ function buildStructuralChecks(
         : 'Todos los módulos están conectados',
     count: checks.orphanFiles.length,
   })
+  out.push({
+    id: 'test-integrity',
+    label: 'Integridad de tests',
+    status: checks.suspiciousTestFiles.length > 0 ? 'fail' : 'pass',
+    detail:
+      checks.suspiciousTestFiles.length > 0
+        ? `Tests que no prueban nada o están saltados: ${checks.suspiciousTestFiles.slice(0, 3).join(', ')}`
+        : 'Las suites de tests presentes pueden fallar de verdad',
+    count: checks.suspiciousTestFiles.length,
+  })
   return out
 }
 

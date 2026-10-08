@@ -6,6 +6,7 @@
 
 import type { RepoFile, RepoFinding } from './repo-types'
 import type { CategoryKey, Severity } from './vibe-types'
+import { detectFakeTests } from './fake-tests'
 
 export const SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', 'out', 'coverage', '.next',
@@ -76,6 +77,8 @@ export interface ScanChecks {
   missingDeps: string[]
   unusedDeps: string[]
   orphanFiles: string[]
+  /** Archivos de test con tautologías, cero asserts, cuerpos vacíos o skips */
+  suspiciousTestFiles: string[]
 }
 
 export interface ScanResult {
@@ -410,6 +413,10 @@ export function scanRepo(files: RepoFile[]): ScanResult {
     )
   }
 
+  // Tests falsos (suite que no puede fallar, tautologías, skips)
+  const fakeTests = detectFakeTests(files)
+  findings.push(...fakeTests.findings)
+
   const languages = [...langCount.entries()]
     .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
     .slice(0, 5)
@@ -427,6 +434,7 @@ export function scanRepo(files: RepoFile[]): ScanResult {
       missingDeps: [...missingDepFiles.keys()],
       unusedDeps: [...manifest.deps].filter((d) => !importedPkgs.has(d) && !d.startsWith('@types/')),
       orphanFiles,
+      suspiciousTestFiles: fakeTests.suspiciousFiles,
     },
   }
 }

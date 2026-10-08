@@ -74,6 +74,28 @@ describe('scanRepo · fixture vibe-coded-repo (defectos plantados)', () => {
     expect(checks.orphanFiles).toContain('src/billing/pagos.ts')
   })
 
+  it('detecta los tests falsos plantados (tautología, vacío, skip y suite sin asserts)', () => {
+    const loginTest = findings.filter((f) => f.file === 'src/auth/login.test.ts')
+    expect(loginTest.map((f) => f.title)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('tautológicas'),
+        expect.stringContaining('cuerpo vacío'),
+        expect.stringContaining('saltados'),
+      ]),
+    )
+    // session.test.ts declara tests sin ni un assert: no puede fallar
+    expect(
+      findings.some(
+        (f) => f.file === 'src/auth/session.test.ts' && f.title.includes('no puede fallar'),
+      ),
+    ).toBe(true)
+    expect(checks.suspiciousTestFiles).toEqual(
+      expect.arrayContaining(['src/auth/login.test.ts', 'src/auth/session.test.ts']),
+    )
+    // el import de vitest está declarado en devDependencies: no es dependencia fantasma
+    expect(checks.missingDeps).not.toContain('vitest')
+  })
+
   it('NO marca falsos positivos (express, node:crypto, manifiesto válido)', () => {
     expect(findings.some((f) => f.title.includes('express'))).toBe(false)
     expect(findings.some((f) => f.title.includes('crypto'))).toBe(false)
