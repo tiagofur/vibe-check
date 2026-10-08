@@ -69,6 +69,7 @@ Real audits: `sindresorhus/slugify` scores **98/100 SHIP IT** (note the trend sp
 - **🔀 Diff mode** — the regression gate. Enter a base ref (tag/branch/sha) and VibeCheck downloads both trees, diffs them, and **audits and scores only the changed files**. Pre-existing findings are excluded from the score and counted. Perfect for PRs.
 - **📈 Trend** — every full audit feeds a historical series per repo: the report shows a sparkline with the score evolution and the delta vs the previous audit (`↗ +5 pts`), and the badge shows the trend arrow. Diff audits are excluded from trends (they score changes, not the repo).
 - **🔥 Roast mode** — the serious report stays serious. Hit "Modo roast" (web) or `--roast` (CLI) for a deterministic, shareable sarcastic summary of the damage. Same repo, same roast — it's reproducible like everything else here.
+- **🛠 Fix pack** — export the findings as copy-paste correction prompts for your AI agent (Cursor, Claude Code, Copilot): one prompt per finding, ordered by severity, with a checklist to tick off as you fix. Button on the report, or `--fix-pack` on the CLI.
 
 ### Quick start
 
@@ -108,6 +109,7 @@ bun cli.ts ./my-project            # human-readable report
 bun cli.ts ./my-project --json     # machine-readable (includes scoreExplanation + roast)
 bun cli.ts ./my-project --roast    # adds the 🔥 roast section
 bun cli.ts . --exclude tests       # exclude paths (repeatable)
+bun cli.ts . --fix-pack > fixes.md # findings as correction prompts for your AI agent
 echo $?                            # 1 if verdict is SUSPICIOUS or DANGER → CI gate
 ```
 

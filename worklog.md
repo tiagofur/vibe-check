@@ -98,3 +98,18 @@ Work Log:
 Stage Summary:
 - La app es funcional al 100% sin .z-ai-config: cualquier repo de GitHub o carpeta local produce reporte completo (score explicable, chequeos, roast) con badge de modo determinista; con credenciales, la IA se agrega encima.
 - Arreglos: page.tsx (webkitdirectory en JSX), deterministic-report.ts (nuevo), route.ts (try/catch ZAI + narrativa post-scoring), repo-types (engine), repo-report-view (badge).
+
+---
+Task ID: 6
+Agent: ZCode (GLM)
+Task: Exportar el reporte como prompts de corrección ("fix pack") para corregir hallazgo por hallazgo con un agente IA.
+
+Work Log:
+- src/lib/fix-prompts.ts (puro): buildFindingPrompt() — prompt autocontenido por hallazgo (archivo+líneas, [SEVERIDAD · categoría], problema, corrección sugerida, instrucción de limitar el cambio y re-auditar); buildFixPack() — documento MD con encabezado (score/veredicto/motor/fecha), desglose "¿por qué este score?" (scoreExplanation), checklist con checkboxes ordenada por severidad (scan ✓verificado antes que ai) y un prompt por hallazgo en bloque de código. FixPackInput = Pick del RepoReport para que el CLI pueda construirlo sin síntesis IA.
+- UI (repo-report-view.tsx): botón "Fix pack" en las acciones del veredicto (descarga vibecheck-fixes-<repo>.md vía Blob + copia al portapapeles con degradación amable si no hay permiso) y botón "Copiar prompt de corrección" dentro de cada hallazgo del acordeón.
+- CLI: --fix-pack imprime solo el pack a stdout (redirigible a fixes.md), mantiene exit codes de gate.
+- Tests: fix-prompts.test.ts (orden severidad/scan-primero, prompt autocontenido, checklist sincronizada con secciones, desglose del score, repo limpio "Nada que corregir", marca ✓verificado). 101 tests en verde.
+- Verificado en navegador con el reporte determinista de dev_deck: botón Fix pack visible, prompt individual copiado (toast con archivo). Nota: dev_deck tiene hallazgos REALES — AWS Access Key y token de GitHub en SecretScannerTool.tsx (probablemente ejemplos de la propia herramienta, pero hay que revisarlo).
+
+Stage Summary:
+- Del reporte a la corrección: el usuario puede descargar el fix pack completo (checklist + prompts por severidad) o copiar el prompt de un hallazgo puntual desde el acordeón, pegarlo en Cursor/Claude/Copilot, corregir, y re-auditar. Cierra el ciclo del producto: auditar → entender → corregir → re-auditar.

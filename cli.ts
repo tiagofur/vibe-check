@@ -15,6 +15,7 @@ import { join, resolve, relative } from 'node:path'
 import { isScannablePath, scanRepo, SKIP_DIRS } from './src/lib/repo-scan'
 import { mergeAndScore, explainScore } from './src/lib/repo-score'
 import { roastRepo } from './src/lib/roast'
+import { buildFixPack } from './src/lib/fix-prompts'
 import { CATEGORY_META, SEVERITY_META, VERDICT_META, verdictFromScore, type CategoryKey } from './src/lib/vibe-types'
 import type { RepoFile } from './src/lib/repo-types'
 
@@ -42,12 +43,13 @@ function walkDir(dir: string, root: string, out: RepoFile[]): void {
 }
 
 function usage(): never {
-  console.error(`Uso: bun cli.ts <carpeta> [--json] [--roast] [--exclude <ruta>]
+  console.error(`Uso: bun cli.ts <carpeta> [--json] [--roast] [--exclude <ruta>] [--fix-pack]
 
 Opciones:
   --json             Salida JSON (para CI u otras herramientas)
   --roast            Añade el modo roast 🔥 (humor determinista, no evidencia)
   --exclude <ruta>   Excluye rutas del escaneo (repetible, ej. tests/fixtures)
+  --fix-pack         Imprime los hallazgos como prompts de corrección (redirige a fixes.md)
 
 Exit codes: 0 = SHIP IT / CASI LISTO · 1 = SOSPECHOSO / PELIGRO o error`)
   process.exit(1)
@@ -110,6 +112,21 @@ async function main() {
         },
       })
     : null
+
+  // fix pack: solo el documento de prompts a stdout, limpio para redirigir
+  if (args.includes('--fix-pack') && !asJson) {
+    console.log(
+      buildFixPack({
+        repoName: name,
+        score,
+        verdict,
+        categories,
+        scoreExplanation: explanation,
+        engine: 'determinista',
+      }),
+    )
+    process.exit(verdict === 'SOSPECHOSO' || verdict === 'PELIGRO' ? 1 : 0)
+  }
 
   if (asJson) {
     console.log(

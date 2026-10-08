@@ -21,12 +21,15 @@ import {
 import type { RepoFinding, RepoReport, StructuralCheck } from '@/lib/repo-types'
 import { explainScore } from '@/lib/repo-score'
 import { roastRepo, roastToMarkdown, signalsFromReport } from '@/lib/roast'
+import { buildFindingPrompt, buildFixPack } from '@/lib/fix-prompts'
 import { computeTrend, trendArrow, type TrendPoint } from '@/lib/trend'
 import { TrendSparkline } from '@/components/vibe/trend-sparkline'
 import { ScoreGauge, MiniRing } from '@/components/vibe/score-gauge'
 import {
   Check,
+  ClipboardCheck,
   Copy,
+  Download,
   FileCode2,
   Flame,
   FolderGit2,
@@ -223,6 +226,40 @@ export function RepoReportView({
     }
   }
 
+  const downloadFixPack = async () => {
+    const pack = buildFixPack(report)
+    const blob = new Blob([pack], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `vibecheck-fixes-${report.repoName.replace(/[^\w.-]+/g, '-')}.md`
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+    let copied = true
+    try {
+      await navigator.clipboard.writeText(pack)
+    } catch {
+      copied = false // sin permiso de portapapeles: la descarga ya salió
+    }
+    toast({
+      title: '🛠 Fix pack descargado',
+      description: copied
+        ? 'También quedó copiado: un prompt por hallazgo, en orden de severidad.'
+        : 'Un prompt por hallazgo, en orden de severidad — pega cada uno en tu agente IA.',
+    })
+  }
+
+  const copyFindingPrompt = async (finding: RepoFinding) => {
+    try {
+      await navigator.clipboard.writeText(buildFindingPrompt(finding))
+      toast({ title: '📋 Prompt copiado', description: `${finding.file} — pégalo en tu agente IA.` })
+    } catch {
+      toast({ title: 'No se pudo copiar', variant: 'destructive' })
+    }
+  }
+
   const structuralFails = report.structural.filter((c) => c.status === 'fail').length
 
   return (
@@ -323,6 +360,9 @@ export function RepoReportView({
                 <div className="flex flex-wrap items-center justify-center gap-2 pt-1 lg:justify-start">
                   <Button size="sm" variant="outline" onClick={copyReport} className="gap-1.5">
                     <Copy className="size-3.5" /> Copiar reporte MD
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={downloadFixPack} className="gap-1.5">
+                    <Download className="size-3.5" /> Fix pack
                   </Button>
                   <Button
                     size="sm"
@@ -554,6 +594,9 @@ export function RepoReportView({
                                 <p className="mt-0.5 text-sm leading-relaxed text-foreground/90">{f.fix}</p>
                               </div>
                             </div>
+                            <Button size="sm" variant="outline" onClick={() => copyFindingPrompt(f)} className="gap-1.5">
+                              <ClipboardCheck className="size-3.5" /> Copiar prompt de corrección
+                            </Button>
                           </AccordionContent>
                         </AccordionItem>
                       )

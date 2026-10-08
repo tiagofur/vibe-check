@@ -69,6 +69,7 @@ Auditorías reales: `sindresorhus/slugify` puntúa **98/100 SHIP IT** (fíjate e
 - **🔀 Modo diff** — el gate de regresión. Escribe un ref base (tag/rama/sha) y VibeCheck descarga ambos árboles, los difuye, y **audita y puntúa solo los archivos cambiados**. Los hallazgos pre-existentes se excluyen del score y se cuentan. Perfecto para PRs.
 - **📈 Tendencia** — cada auditoría completa alimenta una serie histórica por repo: el reporte muestra una sparkline con la evolución y el delta contra la auditoría anterior (`↗ +5 pts`), y el badge incluye la flecha de tendencia. Los audits en modo diff se excluyen de la tendencia (puntúan cambios, no el repo).
 - **🔥 Modo roast** — el reporte serio se queda serio. Dale a "Modo roast" (web) o `--roast` (CLI) para un resumen sarcástico, determinista y compartible del daño. Mismo repo, mismo roast — es reproducible como todo lo demás aquí.
+- **🛠 Fix pack** — exporta los hallazgos como prompts de corrección listos para pegar en tu agente IA (Cursor, Claude Code, Copilot): un prompt por hallazgo, ordenados por severidad, con checklist para ir tachando. Botón en el reporte o `--fix-pack` en el CLI.
 
 ### Inicio rápido
 
@@ -108,6 +109,7 @@ bun cli.ts ./mi-proyecto            # reporte legible
 bun cli.ts ./mi-proyecto --json     # salida para CI (incluye scoreExplanation + roast)
 bun cli.ts ./mi-proyecto --roast    # añade la sección 🔥 roast
 bun cli.ts . --exclude tests        # excluye rutas (repetible)
+bun cli.ts . --fix-pack > fixes.md  # hallazgos como prompts de corrección para tu agente IA
 echo $?                             # 1 si el veredicto es SOSPECHOSO o PELIGRO → gate de CI
 ```
 
