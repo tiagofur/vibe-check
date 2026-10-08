@@ -16,6 +16,7 @@ import { isScannablePath, scanRepo, SKIP_DIRS } from './src/lib/repo-scan'
 import { mergeAndScore, explainScore } from './src/lib/repo-score'
 import { auditBatch, selectAuditFiles, synthesizeReport, type ReduceResult } from './src/lib/repo-llm'
 import { getLLM, type LlmClient } from './src/lib/llm'
+import { matchBench, type BenchResult } from './src/lib/bench'
 import { roastRepo } from './src/lib/roast'
 import { buildFixPack } from './src/lib/fix-prompts'
 import { CATEGORY_META, SEVERITY_META, VERDICT_META, verdictFromScore, type CategoryKey } from './src/lib/vibe-types'
@@ -45,7 +46,7 @@ function walkDir(dir: string, root: string, out: RepoFile[]): void {
 }
 
 function usage(): never {
-  console.error(`Uso: bun cli.ts <carpeta> [--json] [--roast] [--exclude <ruta>] [--fix-pack] [--ai]
+  console.error(`Uso: bun cli.ts <carpeta> [--json] [--roast] [--exclude <ruta>] [--fix-pack] [--ai] [--bench <gt.json>]
 
 Opciones:
   --json             Salida JSON (para CI u otras herramientas)
@@ -54,6 +55,8 @@ Opciones:
   --fix-pack         Imprime los hallazgos como prompts de corrección (redirige a fixes.md)
   --ai               Añade la auditoría IA por lotes (requiere una API key en el entorno;
                      sin credenciales cae al modo determinista con un aviso)
+  --bench <gt.json>  Mide recall/precisión contra una lista ground truth de defectos
+                     esperados ({ entries: [{ id, kind, file?, name?, titleIncludes? }] })
 
 Exit codes: 0 = SHIP IT / CASI LISTO · 1 = SOSPECHOSO / PELIGRO o error`)
   process.exit(1)
@@ -98,6 +101,26 @@ async function main() {
 
   const scan = scanRepo(scanned)
   const name = root.split('/').pop() ?? root
+
+  // ── Benchmark contra ground truth declarado (--bench) ──
+  const benchIdx = args.indexOf('--bench')
+  let bench: BenchResult | null = null
+  if (benchIdx !== -1) {
+    const gtPath = args[benchIdx + 1]
+    if (!gtPath || gtPath.startsWith('--')) usage()
+    const gtAbs = resolve(gtPath!)
+    if (!existsSync(gtAbs)) {
+      console.error(`No existe el archivo ground truth: ${gtAbs}`)
+      process.exit(1)
+    }
+    try {
+      const gt = JSON.parse(readFileSync(gtAbs, 'utf8')) as { entries?: Parameters<typeof matchBench>[0] }
+      bench = matchBench(gt.entries ?? [], scan.findings)
+    } catch (e) {
+      console.error(`Ground truth inválido (${gtAbs}): ${e instanceof Error ? e.message : e}`)
+      process.exit(1)
+    }
+  }
 
   // ── Auditoría IA opcional (--ai): mismos lotes que la web ──
   const asAI = args.includes('--ai')
@@ -205,6 +228,19 @@ async function main() {
           checks: scan.checks,
           categories,
           scoreExplanation: explanation,
+          ...(bench
+            ? {
+                bench: {
+                  expected: bench.expected,
+                  matched: bench.matched.length,
+                  missed: bench.missed.map((m) => m.id),
+                  falsePositives: bench.falsePositives.map((f) => ({ file: f.file, title: f.title })),
+                  recall: Math.round(bench.recall * 1000) / 1000,
+                  precision: Math.round(bench.precision * 1000) / 1000,
+                  f1: Math.round(bench.f1 * 1000) / 1000,
+                },
+              }
+            : {}),
           ...(roast ? { roast } : {}),
         },
         null,
@@ -254,6 +290,21 @@ async function main() {
         console.log(`   • [${sev.label.toUpperCase()}] ${f.title} — ${f.file}${lines}${origin}`)
         console.log(`       ${f.explanation}`)
         console.log(`       Fix: ${f.fix}`)
+      }
+    }
+    if (bench) {
+      const pct = (x: number) => `${Math.round(x * 100)}%`
+      console.log('')
+      console.log('  📏 Benchmark vs ground truth:')
+      console.log(
+        `     Esperados: ${bench.expected} · TP: ${bench.matched.length} · FN: ${bench.missed.length} · FP: ${bench.falsePositives.length}`,
+      )
+      console.log(`     Recall: ${pct(bench.recall)} · Precisión: ${pct(bench.precision)} · F1: ${bench.f1.toFixed(2)}`)
+      for (const m of bench.missed) {
+        console.log(`     Faltante: ${m.id} (${m.kind}${m.file ? ` en ${m.file}` : ''}${m.name ? `: ${m.name}` : ''})`)
+      }
+      for (const f of bench.falsePositives) {
+        console.log(`     No esperado: [${f.category}] ${f.title} — ${f.file}`)
       }
     }
     if (roast) {

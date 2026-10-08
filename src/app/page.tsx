@@ -130,6 +130,11 @@ function TypingTerminal() {
 // El filtrado vive en folder-pick.ts (compartido con el servidor):
 // aquí solo se recorre, se filtra ANTES de leer y se cuentan omitidos.
 
+/** Cuerpo exacto de la última auditoría de repo: permite "Re-auditar" */
+type RepoPayload =
+  | { source: 'github'; url: string; base?: string; token?: string }
+  | { source: 'files'; title?: string; files: { path: string; content: string }[] }
+
 interface FolderPickResult {
   files: { path: string; content: string }[]
   picked: number
@@ -237,6 +242,7 @@ export default function Home() {
   const [report, setReport] = useState<VibeReport | null>(null)
   const [reportTitle, setReportTitle] = useState('')
   const [repoReport, setRepoReport] = useState<RepoReport | null>(null)
+  const [repoAuditPayload, setRepoAuditPayload] = useState<RepoPayload | null>(null)
   const [live, setLive] = useState<LiveProgress | null>(null)
   const [history, setHistory] = useState<AnyHistoryItem[]>([])
   const [historyError, setHistoryError] = useState(false)
@@ -275,6 +281,73 @@ export default function Home() {
   const scrollToAnalyzer = () =>
     analyzerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
+  /** Audita un repo (GitHub o carpeta) con progreso en streaming; guarda el payload para Re-auditar */
+  const runRepoAudit = async (payload: RepoPayload) => {
+    setLoading(true)
+    setReport(null)
+    setRepoReport(null)
+    setLive(null)
+    setRepoAuditPayload(payload)
+    try {
+      const res = await fetch('/api/analyze-repo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+        body: JSON.stringify(payload),
+      })
+
+      if (res.headers.get('content-type')?.includes('x-ndjson') && res.body) {
+        // Progreso real: eventos NDJSON línea a línea
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? ''
+          for (const line of lines) {
+            const ev = parseRepoStreamLine(line)
+            if (!ev) continue
+            if (ev.type === 'progress') {
+              setLive({ phase: ev.phase, pct: ev.pct, message: ev.message })
+            } else if (ev.type === 'error') {
+              throw new Error(ev.error)
+            } else {
+              setRepoReport(ev.report)
+              toast({
+                title: `${VERDICT_META[ev.report.verdict].emoji} ${ev.report.repoName} — Vibe Score: ${ev.report.score}/100`,
+                description: ev.cached
+                  ? 'Resultado servido desde caché — sin costo de IA'
+                  : `Veredicto: ${ev.report.verdict}`,
+              })
+            }
+          }
+        }
+      } else {
+        // Respuesta JSON plana (400/429/500 o proxy sin streaming)
+        const data = (await res.json()) as AnalyzeRepoResponse & { error?: string }
+        if (!res.ok || data.error) throw new Error(data.error || 'Error del servidor')
+        setRepoReport(data.report)
+        toast({
+          title: `${VERDICT_META[data.report.verdict].emoji} ${data.report.repoName} — Vibe Score: ${data.report.score}/100`,
+          description: `Veredicto: ${data.report.verdict}`,
+        })
+      }
+      fetchHistory()
+      setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
+    } catch (e) {
+      toast({
+        title: 'La auditoría falló',
+        description: e instanceof Error ? e.message : 'Error desconocido',
+        variant: 'destructive',
+      })
+    } finally {
+      setLoading(false)
+      setLive(null)
+    }
+  }
+
   const analyze = async () => {
     setLoading(true)
     setReport(null)
@@ -297,51 +370,8 @@ export default function Home() {
         if (tab === 'folder' && pickedFiles.length === 0) {
           throw new Error('Selecciona o arrastra una carpeta con código primero.')
         }
-        const res = await fetch('/api/analyze-repo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-          body: JSON.stringify(payload),
-        })
-
-        if (res.headers.get('content-type')?.includes('x-ndjson') && res.body) {
-          // Progreso real: eventos NDJSON línea a línea
-          const reader = res.body.getReader()
-          const decoder = new TextDecoder()
-          let buffer = ''
-          while (true) {
-            const { value, done } = await reader.read()
-            if (done) break
-            buffer += decoder.decode(value, { stream: true })
-            const lines = buffer.split('\n')
-            buffer = lines.pop() ?? ''
-            for (const line of lines) {
-              const ev = parseRepoStreamLine(line)
-              if (!ev) continue
-              if (ev.type === 'progress') {
-                setLive({ phase: ev.phase, pct: ev.pct, message: ev.message })
-              } else if (ev.type === 'error') {
-                throw new Error(ev.error)
-              } else {
-                setRepoReport(ev.report)
-                toast({
-                  title: `${VERDICT_META[ev.report.verdict].emoji} ${ev.report.repoName} — Vibe Score: ${ev.report.score}/100`,
-                  description: ev.cached
-                    ? 'Resultado servido desde caché — sin costo de IA'
-                    : `Veredicto: ${ev.report.verdict}`,
-                })
-              }
-            }
-          }
-        } else {
-          // Respuesta JSON plana (400/429/500 o proxy sin streaming)
-          const data = (await res.json()) as AnalyzeRepoResponse & { error?: string }
-          if (!res.ok || data.error) throw new Error(data.error || 'Error del servidor')
-          setRepoReport(data.report)
-          toast({
-            title: `${VERDICT_META[data.report.verdict].emoji} ${data.report.repoName} — Vibe Score: ${data.report.score}/100`,
-            description: `Veredicto: ${data.report.verdict}`,
-          })
-        }
+        await runRepoAudit(payload)
+        return
       } else {
         if (code.trim().length < 10) {
           throw new Error('Pega al menos unas líneas para auditar (mínimo 10 caracteres).')
@@ -404,8 +434,20 @@ export default function Home() {
       const res = await fetch(`/api/repo-checks/${id}`)
       if (!res.ok) throw new Error()
       const data = await res.json()
-      setRepoReport(data.report as RepoReport)
+      const loaded = data.report as RepoReport
+      setRepoReport(loaded)
       setReport(null)
+      // reconstruye el payload para "Re-auditar": GitHub sale del nombre+branch,
+      // las carpetas no (los archivos subidos no se persisten)
+      setRepoAuditPayload(
+        loaded.source === 'github'
+          ? {
+              source: 'github',
+              url: `https://github.com/${loaded.repoName}${loaded.branch ? `/tree/${loaded.branch}` : ''}`,
+              base: loaded.diff?.base,
+            }
+          : null,
+      )
       setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
     } catch {
       toast({ title: 'No se pudo cargar la auditoría', variant: 'destructive' })
@@ -824,7 +866,13 @@ export default function Home() {
 
         {/* ── Resultados ───────────────────────────────────── */}
         <section ref={resultsRef} className="mx-auto w-full max-w-6xl scroll-mt-20 px-4 py-6" aria-label="Resultados de la auditoría">
-          {repoReport && <RepoReportView report={repoReport} onNewCheck={scrollToAnalyzer} />}
+          {repoReport && (
+            <RepoReportView
+              report={repoReport}
+              onNewCheck={scrollToAnalyzer}
+              onReaudit={repoAuditPayload ? () => void runRepoAudit(repoAuditPayload) : undefined}
+            />
+          )}
           {report && !repoReport && (
             <ReportView
               report={report}

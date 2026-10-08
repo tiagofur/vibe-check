@@ -220,3 +220,17 @@ Work Log:
 
 Stage Summary:
 - Cada punto perdido tiene justificación defendible: sin doble conteo scan/IA, con evidencia enmascarada por hallazgo de secreto, y severidades que la herramienta misma degrada cuando el contexto dice "es un ejemplo". El benchmark formal recall/precision con ground truth queda como roadmap (el fixture plantado + 145 tests son el embrión).
+
+---
+Task ID: 7
+Agent: ZCode (GLM)
+Task: Falta re-auditar desde el detalle del reporte (el usuario lo pidió tras usar la app).
+
+Work Log:
+- page.tsx: extraído runRepoAudit(payload) de analyze() (resets + fetch NDJSON + toasts + historial + scroll); analyze() valida, construye el payload y delega. Nuevo estado repoAuditPayload: guarda el cuerpo exacto de la última auditoría interactiva y se reconstruye al cargar del historial (GitHub: https://github.com/repo/tree/branch + diff.base; carpetas → null porque los archivos subidos no se persisten).
+- repo-report-view.tsx: prop onReaudit opcional → botón "Re-auditar" (RefreshCw) con tooltip explicando la caché; solo aparece cuando hay payload. "Auditar otro repo" queda como reset.
+- Flujo de corrección completo: auditar → fix pack → corregir con el agente → Re-auditar (mismo objetivo; si no cambió nada sale de caché al instante, si cambió, auditoría fresca).
+- Verificado en navegador con dev_deck cargado del historial: botón visible, clic (vía evaluate por los re-renders del hero), auditoría fresca en el historial "hace menos de un minuto". El usuario ya creó .z-ai-config: la síntesis de dev_deck sale de IA.
+
+Stage Summary:
+- Re-auditar cierra el ciclo auditar→corregir→re-auditar sin reescribir la URL ni re-soltar la carpeta. Carpeta desde historial no ofrece Re-auditar (honesto: los archivos no se guardan).

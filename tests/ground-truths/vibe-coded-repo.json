@@ -1,0 +1,19 @@
+{
+  "repo": "vibe-coded-repo",
+  "description": "Ground truth del fixture con defectos plantados: lo que VibeCheck DEBE detectar (y nada más).",
+  "entries": [
+    { "id": "import-roto-billing-checkout", "kind": "phantom-import", "file": "src/server.ts" },
+    { "id": "dep-fantasma-left-pad-x", "kind": "phantom-dep", "name": "left-pad-x" },
+    { "id": "secreto-aws-server", "kind": "secret", "file": "src/server.ts" },
+    { "id": "secreto-stripe-login", "kind": "secret", "file": "src/auth/login.ts" },
+    { "id": "secreto-db-url-env", "kind": "secret", "file": ".env" },
+    { "id": "secreto-whsec-env", "kind": "secret", "file": ".env" },
+    { "id": "fake-test-tautologia", "kind": "fake-test", "file": "src/auth/login.test.ts", "titleIncludes": "tautológicas" },
+    { "id": "fake-test-vacio", "kind": "fake-test", "file": "src/auth/login.test.ts", "titleIncludes": "cuerpo vacío" },
+    { "id": "fake-test-skip", "kind": "fake-test", "file": "src/auth/login.test.ts", "titleIncludes": "saltados" },
+    { "id": "fake-test-sin-asserts", "kind": "fake-test", "file": "src/auth/session.test.ts", "titleIncludes": "no puede fallar" },
+    { "id": "orphan-pagos", "kind": "orphan", "file": "src/billing/pagos.ts" },
+    { "id": "unused-dep-lodash", "kind": "unused-dep", "name": "lodash" },
+    { "id": "env-commiteado", "kind": "env-committed", "file": ".env" }
+  ]
+}

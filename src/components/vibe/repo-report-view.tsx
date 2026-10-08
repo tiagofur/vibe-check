@@ -37,6 +37,7 @@ import {
   GitCompare,
   Github,
   Radar,
+  RefreshCw,
   Siren,
   Star,
   TriangleAlert,
@@ -138,9 +139,12 @@ function CheckBadge({ check }: { check: StructuralCheck }) {
 export function RepoReportView({
   report,
   onNewCheck,
+  onReaudit,
 }: {
   report: RepoReport
   onNewCheck: () => void
+  /** Presente cuando se puede re-auditar el mismo objetivo (GitHub o carpeta en memoria) */
+  onReaudit?: () => void
 }) {
   const { toast } = useToast()
   const [fileFilter, setFileFilter] = useState<string | null>(null)
@@ -364,6 +368,17 @@ export function RepoReportView({
                   <Button size="sm" variant="outline" onClick={downloadFixPack} className="gap-1.5">
                     <Download className="size-3.5" /> Fix pack
                   </Button>
+                  {onReaudit && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={onReaudit}
+                      className="gap-1.5"
+                      title="Vuelve a auditar el mismo objetivo: si no cambió nada, sale de caché al instante"
+                    >
+                      <RefreshCw className="size-3.5" /> Re-auditar
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="outline"
