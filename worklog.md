@@ -234,3 +234,19 @@ Work Log:
 
 Stage Summary:
 - Re-auditar cierra el ciclo auditar→corregir→re-auditar sin reescribir la URL ni re-soltar la carpeta. Carpeta desde historial no ofrece Re-auditar (honesto: los archivos no se guardan).
+
+---
+Task ID: 14
+Agent: ZCode (GLM)
+Task: Benchmark formal recall/precisión ("ármala") — ground truth declarado + métricas impresas, el experimento propuesto por el review.
+
+Work Log:
+- src/lib/bench.ts (puro): BenchEntry {id, kind, file?, name?, titleIncludes?} + classifyFinding (mapea hallazgos del motor a 7 kinds: phantom-import/dep, secret, fake-test, orphan, unused-dep, env-committed) + matchBench greedy → {matched, missed, falsePositives, recall, precision, f1}.
+- tests/ground-truths/vibe-coded-repo.json: 13 defectos plantados declarados (1 import roto, 1 dep fantasma, 4 secretos, 4 tests falsos, 1 huérfano, 1 dep sin uso, 1 .env commiteado) — FUERA del fixture dir para no contaminar el blob de menciones.
+- cli.ts --bench <gt.json>: métricas impresas (esperados/TP/FN/FP + recall/precisión/F1 + listas de faltantes y no esperados) y bloque bench en --json. Ground truth inválido → error claro.
+- tests/bench.test.ts (6): unidades del matcher (clasificación, filtros file/name/titleIncludes, greedy 1:1, FP bajan precisión) + GOLDEN: fixture vs ground truth exige recall=1 y precisión=1 (cualquier regresión del motor rompe ruidosamente) + E2E del CLI (humano y JSON).
+- Gap destapado por el benchmark: el patrón de credenciales exige valor entre comillas → los .env con valores sin comillas (STRIPE_WEBHOOK_SECRET=whsec_…) no se detectaban. Nuevo patrón SECRET_ENV_UNQUOTED aplicado solo a .env reales (no .env.example): 'Credencial en archivo de entorno' high. En dev_deck encontró UN hallazgo real nuevo: JWT secreto commiteado en backend/.env:L4.
+- 151 tests, tsc/eslint/build limpios.
+
+Stage Summary:
+- "Medir la herramienta en vez de confiar en ella" ya es una línea: bun cli.ts <repo> --bench ground-truth.json. El fixture propio sirve de golden (13/13, 100/100) y el harness destapó y financió su primer fix: credenciales sin comillas en .env.

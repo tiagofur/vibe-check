@@ -70,6 +70,13 @@ const RE_TEST_PATH =
 
 const ENV_EXAMPLE_BASENAMES = new Set(['.env.example', '.env.sample', '.env.template', '.env.defaults'])
 
+/** En archivos .env* los valores van SIN comillas: STRIPE_WEBHOOK_SECRET=whsec_… */
+const SECRET_ENV_UNQUOTED: (typeof SECRET_PATTERNS)[number] = {
+  re: /[A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|APIKEY)[A-Z0-9_]*=[A-Za-z0-9_\-./+]{16,}/,
+  title: 'Credencial en archivo de entorno',
+  severity: 'high',
+}
+
 export interface ManifestInfo {
   name: string | null
   deps: Set<string>
@@ -504,7 +511,10 @@ export function scanRepo(files: RepoFile[], opts: ScanOptions = {}): ScanResult 
     // Secretos (máx 3 matches por archivo para no inundar)
     let fileSecrets = 0
     const contentLines = hasContent ? f.content.split('\n') : []
-    for (const { re, title, severity } of SECRET_PATTERNS) {
+    // en .env reales los valores van sin comillas: se añade el patrón de entorno
+    const secretPatterns =
+      base.startsWith('.env') && !envExample ? [...SECRET_PATTERNS, SECRET_ENV_UNQUOTED] : SECRET_PATTERNS
+    for (const { re, title, severity } of secretPatterns) {
       const m = hasContent ? f.content.match(re) : null
       if (!m) continue
       if (EXAMPLE_CREDENTIALS.has(m[0])) continue

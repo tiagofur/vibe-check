@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { fileURLToPath } from 'node:url'
@@ -66,12 +66,10 @@ describe('matchBench · unidades del matcher', () => {
 })
 
 describe('benchmark dorado · fixture vibe-coded-repo', () => {
-  const { readdirSync, statSync } = require('node:fs') as typeof import('node:fs')
-  const { join: j } = require('node:path') as typeof import('node:path')
-  function load(dir: string, rel = ''): ReturnType<typeof scanRepo> extends never ? never : { path: string; content: string }[] {
+  function load(dir: string, rel = ''): { path: string; content: string }[] {
     const out: { path: string; content: string }[] = []
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const abs = j(dir, entry.name)
+      const abs = join(dir, entry.name)
       const relPath = rel ? `${rel}/${entry.name}` : entry.name
       if (entry.isDirectory()) out.push(...load(abs, relPath))
       else out.push({ path: relPath, content: readFileSync(abs, 'utf8') })
