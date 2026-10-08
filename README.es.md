@@ -151,8 +151,9 @@ Los contenidos de los archivos auditados **nunca se persisten** — solo el repo
 
 ### Límites honestos
 
-- Repos >40 MB comprimidos no soportados; hasta 120 archivos leídos por corrida (el grafo corre sobre el árbol completo).
-- El modo diff apunta a repos de tamaño PR; con más de 120 archivos escaneables el diff es aproximado.
+- **Repos de cualquier tamaño funcionan** — el tarball se lee en streaming: se cuenta el árbol completo y el contenido se retiene del top-120 por riesgo (guard: 1.5 GB descomprimido).
+- El modo diff lee ambos árboles hasta 4.000 archivos; más allá, la comparación es aproximada.
+- Carpetas locales: hasta 800 archivos (≤256 KB cada uno, lectura truncada a 64 KB, 8 MB totales). A node_modules y compañía ni se les camina.
 - Los hallazgos IA pueden contener errores: **no sustituyen una code review humana**. Los deterministas (`origin: scan`) son reproducibles.
 - El rate limiting es en memoria por instancia (sustitúyelo por Redis si escalas).
 

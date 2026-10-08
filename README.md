@@ -151,8 +151,9 @@ Audited file contents are **never persisted** — only the report (scores, findi
 
 ### Honest limits
 
-- Repos >40 MB compressed not supported; up to 120 files read per run (the import graph runs on the full tree).
-- Diff mode targets PR-sized repos; with more than 120 scannable files the diff is approximate.
+- **Repos of any size work** — the tarball is read as a stream: the full tree is counted and content is kept for the top-120 files by risk (guard: 1.5 GB decompressed).
+- Diff mode reads both trees up to 4,000 files; beyond that the comparison is approximate.
+- Local folders: up to 800 files (≤256 KB each, content read truncated at 64 KB, 8 MB total). `node_modules` and friends are never traversed.
 - AI-assisted findings can be wrong: **not a substitute for human code review**. Deterministic findings (`origin: scan`) are reproducible.
 - Rate limiting is in-memory per instance (swap for Redis if you scale out).
 

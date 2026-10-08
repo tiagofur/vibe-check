@@ -63,3 +63,23 @@ Stage Summary:
 - El auto-audit forzó 4 arreglos reales del motor (aliases, generados, archivos grandes, rutas de framework) que mejoran la auditoría de CUALQUIER repo Next.js/React, no solo el propio.
 - Artefactos: `src/lib/roast.ts`, `src/lib/fake-tests.ts`, `explainScore()` en `repo-score.ts`, `src/lib/repo-types.ts` (+ScoreExplanation), `repo-report-view.tsx` (desglose + roast), `cli.ts` (--roast/--exclude/desglose), `analyze-repo/route.ts` (scoreExplanation + test-integrity), `docs/vibecheck-action.yml` (gate+diff), `.github/workflows/self-audit.yml`, fixture +2 tests falsos, tests: score-explain/fake-tests/roast suites (75 en verde).
 - Pendiente (roadmap): publicar CLI en npm, atribución de score en tendencias por PR, OAuth.
+
+---
+Task ID: 4
+Agent: ZCode (GLM)
+Task: Arreglar los dos bloqueos que reportó el usuario al probar: repos de GitHub >40MB (error duro del tarball) y carpetas locales con node_modules (browser colgado + topes ridículos).
+
+Work Log:
+- Diagnóstico: (1) fetchTarball descargaba el tarball COMPLETO a un Buffer y lanzaba error si pasaba 40MB comprimido, sin plan B; (2) filesFromDataTransfer (drag&drop) recorría node_modules entero llamando .file() por cada archivo ANTES de filtrar, y los caps eran 300 archivos / 900KB / 40KB por archivo — inútil para un proyecto React real.
+- **tar-gz.ts (nuevo, cero deps)**: parser tar incremental sobre el stream del codeload — Readable.fromWeb → createGunzip → BlockReader de bloques 512B con cola; soporta ustar (name+prefix), pax 'x' (lo que emiten los tarballs de GitHub para paths largos), GNU longname 'L' y pax global 'g'; directorios no se entregan. readTarTree(): cuenta TODAS las entradas escaneables (treeCount real) y retiene contenido solo del TopRiskKeeper (top-N por riskScore, evicción sin leer lo que no cabe, lectura truncada a 64KB). Guard de descompresión 1.5GB con mensaje dinámico. Errores claros de tarball truncado/corrupto. buildTarBuffer() construye tars en memoria para los tests (incluye pax y longname).
+- **route.ts**: fuera fetchTarball/extractAndRead/writeTempTar (y el error de 40MB); downloadTree() descarga en streaming con hash sha256 del stream (caché intacta) vía TransformStream; timeout 45s→120s. Modo diff: ambos árboles hasta 4000 archivos (antes 120, el diff era aún más aproximado). DESCUBIERTO EN LA PRUEBA: next.js usa 'canary' como default — añadido fetchDefaultBranch() (1 llamada API solo si main/master dan 404). IngestResult ganó `truncated` (honestidad del badge).
+- **folder-pick.ts (nuevo, puro, compartido cliente/servidor)**: FOLDER_CAPS (800 archivos, 8MB total, ≤256KB por archivo, lectura 64KB, 20k candidatos), HEAVY_DIR_NAMES, pickDecision() ('ok' | heavy-dir | binary | too-big | no-ext) y omittedSummary() para el toast. page.tsx: el walker ya NO desciende a node_modules/.git/dist... (ni un .file() dentro) + tope de candidatos; readFolder() filtra antes de leer con contadores; toasts "X archivos listos · Y no elegibles · Z por tope"; dropzone actualizado (256KB/800).
+- **route.ts server**: zod alineado (800 archivos, contenido ≤128KB, superRefine de presupuesto total 8MB), MAX_SCAN_FILES 220→600.
+- Verificación E2E real (server local en 3001): facebook/react (tarball >40MB) → "Árbol leído en streaming: 7073 archivos escaneables — contenido del top 120 por riesgo", 195 hallazgos del grafo, falla solo en ZAI.create() (sin .z-ai-config) = ingesta completa OK. tiagofur/dev_deck (pedido por el usuario para pruebas) → 712 archivos, 48 hallazgos, mismo punto de corte sano. Caps: 850 archivos → HTTP 400; 500 archivos → pasa hasta la IA. 94 tests.
+- READMEs (es+en): "Límites honestos" reescritos — repos de cualquier tamaño, diff hasta 4000, caps de carpeta nuevos.
+
+Stage Summary:
+- El error ">40 MB comprimido" de la captura del usuario ya no existe: cualquier repo de GitHub audita con memoria acotada (streaming, top-120 por riesgo) y conteo real del árbol.
+- Las carpetas locales con node_modules funcionan: el walker ni las camina, y los topes (800×256KB/8MB) permiten proyectos reales.
+- Argyectos: src/lib/tar-gz.ts, src/lib/folder-pick.ts, route.ts (downloadTree/fetchDefaultBranch/zod), page.tsx (walker+readFolder+toasts), tests tar-gz+folder-pick (94 en verde).
+- Pendiente: probar el flujo de carpeta en el navegador real (drag&drop manual del usuario); con .z-ai-config, dev_deck debería auditar de punta a punta.
