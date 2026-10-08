@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { SAMPLES, type Sample } from '@/lib/samples'
+import { FOLDER_CAPS, HEAVY_DIR_NAMES, omittedSummary, pickDecision, type OmitReason } from '@/lib/folder-pick'
 import {
   LANGUAGES,
   MAX_CODE_LENGTH,
@@ -60,15 +61,6 @@ const TERMINAL_LINES = [
   '[🤖] Señal: 3 archivos "por si acaso" que nadie importa',
   '✓ Reporte listo — Vibe Score: 31/100 · Veredicto: PELIGRO 🚨',
 ]
-
-const BINARY_EXT = new Set([
-  'png', 'jpg', 'jpeg', 'gif', 'ico', 'webp', 'mp4', 'mp3', 'woff', 'woff2', 'ttf',
-  'eot', 'otf', 'zip', 'tar', 'gz', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'exe',
-  'dll', 'so', 'dylib', 'class', 'jar', 'pyc', 'wasm', 'map', 'db', 'lock',
-])
-
-const SKIP_PATH_RE =
-  /(^|\/)(node_modules|\.git|dist|build|out|coverage|\.next|vendor|__pycache__|\.venv|venv|target)(\/|$)/
 
 function terminalLineClass(line: string): string {
   if (line.startsWith('$')) return 'text-emerald-400'
@@ -134,29 +126,56 @@ function TypingTerminal() {
 
 // ── Lectura de carpetas (input webkitdirectory + drag&drop) ──
 
-async function readFilesList(fileList: File[]): Promise<{ path: string; content: string }[]> {
-  const out: { path: string; content: string }[] = []
+// ── Lectura de carpetas (input webkitdirectory + drag&drop) ──
+// El filtrado vive en folder-pick.ts (compartido con el servidor):
+// aquí solo se recorre, se filtra ANTES de leer y se cuentan omitidos.
+
+interface FolderPickResult {
+  files: { path: string; content: string }[]
+  picked: number
+  omitted: Partial<Record<OmitReason, number>>
+  candidateLimitHit: boolean
+}
+
+async function readFolder(fileList: File[]): Promise<FolderPickResult> {
+  const files: { path: string; content: string }[] = []
+  const omitted: Partial<Record<OmitReason, number>> = {}
   let total = 0
+  let candidateLimitHit = false
+
   for (const file of fileList) {
     const rel =
       (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
-    if (SKIP_PATH_RE.test(rel)) continue
-    if (file.size > 40 * 1024) continue
-    const ext = rel.split('.').pop()?.toLowerCase() ?? ''
-    if (!ext || BINARY_EXT.has(ext)) continue
-    if (out.length >= 300) break
+    const decision = pickDecision(rel, file.size)
+    if (decision !== 'ok') {
+      omitted[decision] = (omitted[decision] ?? 0) + 1
+      continue
+    }
+    if (files.length >= FOLDER_CAPS.maxFiles) {
+      omitted['overflow-files'] = (omitted['overflow-files'] ?? 0) + 1
+      continue
+    }
     const text = await file.text()
-    if (total + text.length > 900_000) break
+    if (total + text.length > FOLDER_CAPS.maxTotalBytes) {
+      omitted['overflow-bytes'] = (omitted['overflow-bytes'] ?? 0) + 1
+      continue
+    }
     total += text.length
-    out.push({ path: rel.replace(/^\.\//, ''), content: text })
+    files.push({ path: rel.replace(/^\.\//, ''), content: text.slice(0, FOLDER_CAPS.readCap) })
   }
-  return out
+  return { files, picked: files.length, omitted, candidateLimitHit }
 }
 
-async function filesFromDataTransfer(dt: DataTransfer): Promise<File[]> {
+async function filesFromDataTransfer(dt: DataTransfer): Promise<{ files: File[]; candidateLimitHit: boolean }> {
   const files: File[] = []
+  let candidateLimitHit = false
   const walk = async (entry: FileSystemEntry, prefix: string): Promise<void> => {
+    if (candidateLimitHit) return
     if (entry.isFile) {
+      if (files.length >= FOLDER_CAPS.maxCandidates) {
+        candidateLimitHit = true
+        return
+      }
       await new Promise<void>((resolve) => {
         ;(entry as FileSystemFileEntry).file(
           (f) => {
@@ -172,6 +191,8 @@ async function filesFromDataTransfer(dt: DataTransfer): Promise<File[]> {
         )
       })
     } else if (entry.isDirectory) {
+      // node_modules y compañía NO se recorren: ni un solo .file() dentro
+      if (HEAVY_DIR_NAMES.has(entry.name)) return
       const reader = (entry as FileSystemDirectoryEntry).createReader()
       const readAll = (): Promise<FileSystemEntry[]> =>
         new Promise((resolve) => {
@@ -189,7 +210,7 @@ async function filesFromDataTransfer(dt: DataTransfer): Promise<File[]> {
     .map((i) => i.webkitGetAsEntry?.())
     .filter((e): e is FileSystemEntry => Boolean(e))
   for (const e of entries) await walk(e, '')
-  return files
+  return { files, candidateLimitHit }
 }
 
 // ── Historial unificado ───────────────────────────────────────
@@ -404,13 +425,14 @@ export default function Home() {
   const onFolderInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? [])
     if (files.length === 0) return
-    const picked = await readFilesList(files)
-    setPickedFiles(picked)
+    const picked = await readFolder(files)
+    setPickedFiles(picked.files)
     const root = files[0]?.webkitRelativePath?.split('/')[0] ?? 'carpeta'
     setPickedName(root)
+    const omitted = omittedSummary(picked.omitted)
     toast({
       title: `📁 Carpeta lista: ${root}`,
-      description: `${picked.length} archivos legibles para auditar`,
+      description: `${picked.picked} archivos listos${omitted ? ` · ${omitted}` : ''}`,
     })
   }
 
@@ -418,17 +440,25 @@ export default function Home() {
     e.preventDefault()
     setDragOver(false)
     const dt = e.dataTransfer
-    const files = dt.items?.length ? await filesFromDataTransfer(dt) : Array.from(dt.files ?? [])
+    const { files, candidateLimitHit } = dt.items?.length
+      ? await filesFromDataTransfer(dt)
+      : { files: Array.from(dt.files ?? []), candidateLimitHit: false }
     if (files.length === 0) return
-    const picked = await readFilesList(files)
-    if (picked.length === 0) {
+    const picked = await readFolder(files)
+    if (picked.files.length === 0) {
       toast({ title: 'No hay archivos audibles', description: '¿Solo binarios o node_modules?', variant: 'destructive' })
       return
     }
-    setPickedFiles(picked)
-    const root = picked[0]?.path.split('/')[0] ?? 'carpeta'
+    setPickedFiles(picked.files)
+    const root = picked.files[0]?.path.split('/')[0] ?? 'carpeta'
     setPickedName(root)
-    toast({ title: `📁 Carpeta lista: ${root}`, description: `${picked.length} archivos legibles` })
+    const omitted = omittedSummary(picked.omitted)
+    toast({
+      title: `📁 Carpeta lista: ${root}`,
+      description:
+        `${picked.picked} archivos listos${omitted ? ` · ${omitted}` : ''}` +
+        (candidateLimitHit ? ` · recorrido limitado a ${FOLDER_CAPS.maxCandidates.toLocaleString('es-MX')} candidatos` : ''),
+    })
   }
 
   const lines = code ? code.split('\n').length : 0
@@ -656,7 +686,7 @@ export default function Home() {
                           Arrastra una <span className="text-emerald-400">carpeta</span> aquí
                         </p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
-                          Se ignoran node_modules, .git, binarios y archivos &gt; 40 KB · máx. 300 archivos
+                          Se ignoran node_modules, .git, binarios y archivos &gt; 256 KB · máx. 800 archivos
                         </p>
                       </div>
                       <Button

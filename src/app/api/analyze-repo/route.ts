@@ -17,17 +17,15 @@ import {
 import { changedPaths, diffTrees, type TreeDiff } from '@/lib/repo-diff'
 import { explainScore, mergeAndScore, verdictFromScore } from '@/lib/repo-score'
 import { auditBatch, selectAuditFiles, synthesizeReport } from '@/lib/repo-llm'
+import { FOLDER_CAPS } from '@/lib/folder-pick'
 import { MAX_DECOMPRESSED_BYTES, readTarTree, type TreeReadResult } from '@/lib/tar-gz'
 import type { CategoryKey } from '@/lib/vibe-types'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
 
-const MAX_SCAN_FILES = 220
+const MAX_SCAN_FILES = 600
 const MAX_FETCH_FILES = 120
-const MAX_FILE_BYTES = 40 * 1024
-const MAX_UPLOAD_FILES = 300
-const MAX_UPLOAD_TOTAL = 900_000
 
 const REPO_AUDITS_PER_HOUR = 10
 const HOUR_MS = 60 * 60 * 1000
@@ -48,11 +46,18 @@ const bodySchema = z.discriminatedUnion('source', [
       .array(
         z.object({
           path: z.string().min(1).max(300),
-          content: z.string().max(MAX_FILE_BYTES * 2),
+          // el cliente recorta el contenido a FOLDER_CAPS.readCap (64KB); holgura multibyte
+          content: z.string().max(128 * 1024),
         }),
       )
       .min(1)
-      .max(MAX_UPLOAD_FILES),
+      .max(FOLDER_CAPS.maxFiles)
+      .superRefine((files, ctx) => {
+        const total = files.reduce((sum, f) => sum + f.content.length, 0)
+        if (total > FOLDER_CAPS.maxTotalBytes) {
+          ctx.addIssue({ code: 'custom', message: 'La carpeta excede el presupuesto total de contenido' })
+        }
+      }),
   }),
 ])
 
