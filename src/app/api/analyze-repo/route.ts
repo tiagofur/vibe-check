@@ -12,12 +12,12 @@ import {
 } from '@/lib/repo-types'
 import {
   isScannablePath,
-  riskScore,
   scanRepo,
 } from '@/lib/repo-scan'
 import { changedPaths, diffTrees, type TreeDiff } from '@/lib/repo-diff'
 import { explainScore, mergeAndScore, verdictFromScore } from '@/lib/repo-score'
 import { auditBatch, selectAuditFiles, synthesizeReport } from '@/lib/repo-llm'
+import { MAX_DECOMPRESSED_BYTES, readTarTree, type TreeReadResult } from '@/lib/tar-gz'
 import type { CategoryKey } from '@/lib/vibe-types'
 
 export const runtime = 'nodejs'
@@ -82,14 +82,6 @@ function parseGitHubUrl(url: string): { owner: string; repo: string; branch?: st
   return { owner: m[1] ?? '', repo: m[2] ?? '', branch: m[3] }
 }
 
-const HEAVY_DIRS = new Set([
-  'node_modules', '.git', 'dist', 'build', 'out', 'coverage', '.next',
-  'vendor', '__pycache__', '.venv', 'venv', 'target', '.idea', '.vscode',
-])
-
-/** Un ref puede ser tag, rama o sha: probamos las tres formas */
-const refCandidates = (ref: string): string[] => [`refs/tags/${ref}`, `refs/heads/${ref}`, ref]
-
 interface IngestResult {
   files: RepoFile[]
   repoName: string
@@ -99,25 +91,51 @@ interface IngestResult {
   treePreview: string[]
   /** sha256 del contenido descargado: clave de caché */
   contentHash: string
+  /** El árbol excedió el cap de lectura: se auditó el top-N por riesgo */
+  truncated: boolean
   /** Presente en modo diff: cambios entre el ref base y el auditado */
   diff?: TreeDiff
   /** sha256 del árbol base (parte de la clave de caché en modo diff) */
   baseHash?: string
 }
 
-interface Tarball {
-  buf: Buffer
-  /** ref que funcionó, sin el prefijo refs/heads|tags/ */
-  ref: string
+/** En modo diff ambos árboles se leen completos (hasta este cap) para comparar contenido */
+const MAX_DIFF_FILES = 4000
+
+/** Rama default de un repo vía API (1 llamada, solo si main/master no existen) */
+async function fetchDefaultBranch(owner: string, repo: string, token: string | undefined): Promise<string | null> {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+      headers: {
+        'User-Agent': 'vibecheck-opensource-auditor',
+        Accept: 'application/vnd.github+json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!res.ok) return null
+    const json = (await res.json()) as { default_branch?: string }
+    return json.default_branch ?? null
+  } catch {
+    return null
+  }
 }
 
-async function fetchTarball(
+/** Un ref puede ser tag, rama o sha: probamos las tres formas */
+const refCandidates = (ref: string): string[] => [`refs/tags/${ref}`, `refs/heads/${ref}`, ref]
+
+/**
+ * Descarga el tarball del ref EN STREAMING (sin límite de tamaño: el
+ * stream se consume entrada a entrada) y lee el árbol top-N por riesgo.
+ */
+async function downloadTree(
   owner: string,
   repo: string,
   candidates: string[],
   token: string | undefined,
   label: string,
-): Promise<Tarball> {
+  opts: { maxFiles: number },
+): Promise<{ ref: string; contentHash: string; tree: TreeReadResult }> {
   const headers: Record<string, string> = { 'User-Agent': 'vibecheck-opensource-auditor' }
   if (token) headers.Authorization = `Bearer ${token}`
   const base = token
@@ -127,14 +145,27 @@ async function fetchTarball(
   for (const candidate of candidates) {
     const res = await fetch(`${base}/${candidate}`, {
       headers,
-      signal: AbortSignal.timeout(45000),
+      signal: AbortSignal.timeout(120_000),
     })
-    if (res.ok) {
-      const buf = Buffer.from(await res.arrayBuffer())
-      if (buf.length > 40 * 1024 * 1024) {
-        throw new Error('El repo es demasiado grande para la auditoría gratuita (>40 MB comprimido).')
+    if (res.ok && res.body) {
+      const hash = createHash('sha256')
+      const hashed = res.body.pipeThrough(
+        new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, controller) {
+            hash.update(chunk)
+            controller.enqueue(chunk)
+          },
+        }),
+      )
+      const tree = await readTarTree(hashed, {
+        maxFiles: opts.maxFiles,
+        maxDecompressedBytes: opts.maxFiles > 1000 ? MAX_DECOMPRESSED_BYTES : MAX_DECOMPRESSED_BYTES,
+      })
+      return {
+        ref: candidate.replace(/^refs\/(tags|heads)\//, ''),
+        contentHash: hash.digest('hex'),
+        tree,
       }
-      return { buf, ref: candidate.replace(/^refs\/(tags|heads)\//, '') }
     }
     if (res.status === 404) continue
     if (res.status === 403 || res.status === 429) {
@@ -149,74 +180,6 @@ async function fetchTarball(
   throw new Error(
     `No se encontró ${label}${candidates[0] ? ` ("${candidates[0].replace(/^refs\/(tags|heads)\//, '')}")` : ''}. Si el repo es privado, proporciona un token con scope repo.`,
   )
-}
-
-/** Extrae el tarball y lee los archivos escaneables (con caps) */
-async function extractAndRead(
-  tarPath: string,
-): Promise<{ files: RepoFile[]; treeCount: number; treePreview: string[] }> {
-  const { execFile } = await import('node:child_process')
-  const { promisify } = await import('node:util')
-  const { mkdtemp, writeFile, readdir, readFile, stat, rm } = await import('node:fs/promises')
-  const { tmpdir } = await import('node:os')
-  const pathMod = await import('node:path')
-  const execFileAsync = promisify(execFile)
-  const workDir = pathMod.dirname(tarPath)
-
-  await execFileAsync('tar', ['-xzf', tarPath, '-C', workDir, '--no-same-owner'], { timeout: 45000 })
-  const entries = await readdir(workDir)
-  const top = entries.find((e) => e !== 'repo.tar.gz')
-  if (!top) throw new Error('El archivo descargado del repo está vacío.')
-  const rootDir = pathMod.join(workDir, top)
-
-  // Recolecta archivos escaneables (validando rutas contra zip-slip)
-  const all: { path: string; abs: string; size: number }[] = []
-  async function walk(dir: string, rel: string): Promise<void> {
-    const items = await readdir(dir, { withFileTypes: true })
-    for (const item of items) {
-      const abs = pathMod.join(dir, item.name)
-      const relPath = rel ? `${rel}/${item.name}` : item.name
-      if (item.isDirectory()) {
-        if (HEAVY_DIRS.has(item.name)) continue
-        await walk(abs, relPath)
-      } else if (item.isFile()) {
-        const resolved = pathMod.resolve(abs)
-        if (!resolved.startsWith(pathMod.resolve(rootDir))) continue
-        const st = await stat(abs)
-        all.push({ path: relPath, abs, size: st.size })
-      }
-    }
-  }
-  await walk(rootDir, '')
-
-  const scannable = all
-    .filter((f) => isScannablePath(f.path, f.size))
-    .sort((a, b) => riskScore(b.path) - riskScore(a.path))
-  const treeCount = scannable.length
-  const treePreview = scannable.slice(0, 120).map((f) => f.path)
-  const selected = scannable.slice(0, MAX_FETCH_FILES)
-
-  const files: RepoFile[] = []
-  for (const f of selected) {
-    try {
-      // truncado al leer: los archivos grandes aportan imports al grafo, no texto completo
-      const content = (await readFile(f.abs, 'utf8')).slice(0, 64 * 1024)
-      files.push({ path: f.path, content })
-    } catch {
-      /* archivo ilegible: se ignora */
-    }
-  }
-  return { files, treeCount, treePreview }
-}
-
-async function writeTempTar(buf: Buffer): Promise<string> {
-  const { mkdtemp, writeFile } = await import('node:fs/promises')
-  const { tmpdir } = await import('node:os')
-  const pathMod = await import('node:path')
-  const dir = await mkdtemp(pathMod.join(tmpdir(), 'vibecheck-'))
-  const tarPath = pathMod.join(dir, 'repo.tar.gz')
-  await writeFile(tarPath, buf)
-  return tarPath
 }
 
 async function ingestGitHub(url: string, emit: Emit, opts: { token?: string; base?: string }): Promise<IngestResult> {
@@ -237,18 +200,36 @@ async function ingestGitHub(url: string, emit: Emit, opts: { token?: string; bas
   })
 
   const headCandidates = parsed.branch ? refCandidates(parsed.branch) : ['refs/heads/main', 'refs/heads/master']
-  const head = await fetchTarball(parsed.owner, parsed.repo, headCandidates, token, 'el repo o la rama')
-  const contentHash = createHash('sha256').update(head.buf).digest('hex')
-
-  emit({ type: 'progress', phase: 'descarga', pct: 14, message: 'Descomprimiendo y leyendo el árbol del repo…' })
-  const headTar = await writeTempTar(head.buf)
-  let headTree: Awaited<ReturnType<typeof extractAndRead>>
+  let head: Awaited<ReturnType<typeof downloadTree>>
   try {
-    headTree = await extractAndRead(headTar)
-  } finally {
-    const { rm } = await import('node:fs/promises')
-    await rm(headTar, { recursive: true, force: true })
+    head = await downloadTree(parsed.owner, parsed.repo, headCandidates, token, 'el repo o la rama', {
+      maxFiles: opts.base ? MAX_DIFF_FILES : MAX_FETCH_FILES,
+    })
+  } catch (err) {
+    // sin rama explícita, la default puede no ser main/master (ej. next.js usa canary)
+    if (parsed.branch) throw err
+    const defaultBranch = await fetchDefaultBranch(parsed.owner, parsed.repo, token)
+    if (!defaultBranch) throw err
+    emit({
+      type: 'progress',
+      phase: 'descarga',
+      pct: 8,
+      message: `La rama default es "${defaultBranch}" — descargando esa…`,
+    })
+    head = await downloadTree(parsed.owner, parsed.repo, refCandidates(defaultBranch), token, 'el repo o la rama', {
+      maxFiles: opts.base ? MAX_DIFF_FILES : MAX_FETCH_FILES,
+    })
   }
+  const headTree = head.tree
+
+  emit({
+    type: 'progress',
+    phase: 'descarga',
+    pct: 14,
+    message: headTree.truncated
+      ? `Árbol leído en streaming: ${headTree.treeCount} archivos escaneables — contenido del top ${headTree.files.length} por riesgo`
+      : `Árbol completo leído en streaming: ${headTree.treeCount} archivos escaneables`,
+  })
 
   if (headTree.files.length === 0) {
     throw new Error('El repo no contiene archivos de código auditable (¿solo binarios/documentación?).')
@@ -259,18 +240,15 @@ async function ingestGitHub(url: string, emit: Emit, opts: { token?: string; bas
 
   // ── Modo diff: descargar el ref base y comparar árboles ──
   if (opts.base) {
-    const baseTar = await fetchTarball(parsed.owner, parsed.repo, refCandidates(opts.base), token, `el ref base "${opts.base}"`)
-    baseHash = createHash('sha256').update(baseTar.buf).digest('hex')
+    const base = await downloadTree(parsed.owner, parsed.repo, refCandidates(opts.base), token, `el ref base "${opts.base}"`, {
+      maxFiles: MAX_DIFF_FILES,
+    })
+    baseHash = base.contentHash
     emit({ type: 'progress', phase: 'descarga', pct: 20, message: `Descargando el ref base "${opts.base}" para el diff…` })
-    const baseTarPath = await writeTempTar(baseTar.buf)
-    let baseTree: Awaited<ReturnType<typeof extractAndRead>>
-    try {
-      baseTree = await extractAndRead(baseTarPath)
-    } finally {
-      const { rm } = await import('node:fs/promises')
-      await rm(baseTarPath, { recursive: true, force: true })
-    }
-    diff = diffTrees(new Map(baseTree.files.map((f) => [f.path, f.content])), new Map(headTree.files.map((f) => [f.path, f.content])))
+    diff = diffTrees(
+      new Map(base.tree.files.map((f) => [f.path, f.content])),
+      new Map(headTree.files.map((f) => [f.path, f.content])),
+    )
     emit({
       type: 'progress',
       phase: 'estructura',
@@ -286,7 +264,8 @@ async function ingestGitHub(url: string, emit: Emit, opts: { token?: string; bas
     stars: null, // el tarball anónimo no expone metadatos; sin estrellas por ahora
     treeCount: headTree.treeCount,
     treePreview: headTree.treePreview,
-    contentHash,
+    contentHash: head.contentHash,
+    truncated: headTree.truncated,
     diff,
     baseHash,
   }
@@ -311,6 +290,7 @@ function ingestFolder(body: Extract<Body, { source: 'files' }>): IngestResult {
     treeCount: files.length,
     treePreview: files.map((f) => f.path),
     contentHash,
+    truncated: false,
   }
 }
 
@@ -417,7 +397,7 @@ async function runAudit(
     emit({ type: 'progress', phase: 'estructura', pct: 8, message: 'Filtrando y leyendo archivos de la carpeta…' })
     ingest = ingestFolder(body)
   }
-  const { files, repoName, branch, stars, treeCount, treePreview, contentHash, diff, baseHash } = ingest
+  const { files, repoName, branch, stars, treeCount, treePreview, contentHash, truncated, diff, baseHash } = ingest
   const cacheKey = `repo:${repoName}@${contentHash}${diff && baseHash ? `~diff:${baseHash}` : ''}`
   const changed = diff ? changedPaths(diff) : null
 
@@ -500,7 +480,7 @@ async function runAudit(
       filesAudited: selection.auditedPaths.length,
       totalLines: scan.stats.totalLines,
       languages: scan.stats.languages,
-      truncated: treeCount > MAX_FETCH_FILES,
+      truncated,
     },
     externalUsed: scan.stats.externalUsed,
     diff: diff && baseRef ? { base: baseRef, changed: changed?.size ?? 0 } : undefined,
@@ -530,7 +510,7 @@ async function runAudit(
       filesAudited: selection.auditedPaths.length,
       totalLines: scan.stats.totalLines,
       languages: scan.stats.languages,
-      truncated: treeCount > MAX_FETCH_FILES,
+      truncated,
     },
     diff:
       diff && baseRef
