@@ -350,6 +350,16 @@ describe('scanRepo · patrones de credenciales sin falsos positivos', () => {
     ])
     expect(res.checks.secretCount).toBe(2)
   })
+
+  it('la evidencia del secreto va enmascarada (el reporte no filtra el valor)', () => {
+    const res = scanRepo([
+      { path: 'src/config.ts', content: `const password = "supersecreto123456"\n` },
+    ])
+    const f = res.findings.find((x) => x.category === 'security')
+    expect(f?.explanation).toContain('••••••')
+    expect(f?.explanation).toContain('pass')
+    expect(f?.explanation).not.toContain('supersecreto123456')
+  })
 })
 
 describe('scanRepo · dependencias sin uso (incluye scope @org/pkg)', () => {

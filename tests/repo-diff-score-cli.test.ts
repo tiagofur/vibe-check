@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { changedPaths, diffTrees } from '../src/lib/repo-diff'
-import { mergeAndScore } from '../src/lib/repo-score'
+import { dropAiDuplicates, mergeAndScore } from '../src/lib/repo-score'
 import type { RepoFinding } from '../src/lib/repo-types'
 
 describe('diffTrees', () => {
@@ -48,6 +48,29 @@ describe('mergeAndScore (fuente compartida route/CLI)', () => {
       finding('a.ts', 'low', 'bugs'),
     ], [])
     expect(score).toBeLessThanOrEqual(35)
+  })
+
+  it('sin doble conteo: un hallazgo IA que repite uno del scan en el mismo lugar se descarta', () => {
+    const scan: RepoFinding = { ...finding('src/auth.ts', 'high', 'security'), title: 'AWS Access Key', lines: [21] }
+    const aiMismoLugar: RepoFinding = { ...finding('src/auth.ts', 'critical', 'security'), title: 'Credencial de AWS expuesta en el código', lines: [22], origin: 'ai' as const }
+    const aiOtraCategoria: RepoFinding = { ...finding('src/auth.ts', 'high', 'bugs'), title: 'Token comparado inseguro', lines: [22], origin: 'ai' as const }
+    const aiLejos: RepoFinding = { ...finding('src/auth.ts', 'high', 'security'), title: 'Token viejo sin rotar', lines: [200], origin: 'ai' as const }
+    const { allFindings, score } = mergeAndScore([scan], [aiMismoLugar, aiOtraCategoria, aiLejos])
+    // el duplicado IA muere aunque pida severity mayor; el scan (verificado) queda
+    expect(allFindings.filter((f) => f.category === 'security').map((f) => f.title)).toEqual([
+      'AWS Access Key',
+      'Token viejo sin rotar',
+    ])
+    // sin el crítico duplicado no hay techo duro: el scan era high
+    expect(score).toBeGreaterThan(35)
+  })
+
+  it('dropAiDuplicates: scan sin líneas deduplica en conservador; el hallazgo lejos queda', () => {
+    const scanSinLineas: RepoFinding = { ...finding('package.json', 'low', 'overengineering'), title: 'deps sin uso', lines: [] }
+    const cerca: RepoFinding = { ...finding('package.json', 'medium', 'overengineering'), title: 'config muerta', lines: [9], origin: 'ai' as const }
+    expect(dropAiDuplicates([scanSinLineas], [cerca])).toEqual([])
+    const scanLejos: RepoFinding = { ...finding('package.json', 'low', 'overengineering'), title: 'deps sin uso', lines: [1] }
+    expect(dropAiDuplicates([scanLejos], [cerca])).toEqual([cerca])
   })
 
   it('modo diff: solo puntúan los hallazgos de archivos cambiados', () => {

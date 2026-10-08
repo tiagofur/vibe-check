@@ -20,6 +20,25 @@ export function dedupeFindings(findings: RepoFinding[]): RepoFinding[] {
   })
 }
 
+/**
+ * Un hallazgo IA que repite uno del escaneo determinista (mismo archivo,
+ * categoría y ±2 líneas) no suma dos veces: el scan es la fuente autoritativa
+ * (verificable) y el duplicado de IA se descarta.
+ */
+export function dropAiDuplicates(scanFindings: RepoFinding[], aiFindings: RepoFinding[]): RepoFinding[] {
+  return aiFindings.filter((a) => {
+    const duplicated = scanFindings.some(
+      (s) =>
+        s.file === a.file &&
+        s.category === a.category &&
+        (s.lines.length === 0 || a.lines.length === 0
+          ? true
+          : s.lines.some((sl) => a.lines.some((al) => Math.abs(al - sl) <= 2))),
+    )
+    return !duplicated
+  })
+}
+
 export interface MergeOptions {
   /**
    * Modo diff: si se pasa, solo los hallazgos en estos archivos puntúan.
@@ -41,7 +60,7 @@ export function mergeAndScore(
   aiFindings: RepoFinding[],
   opts?: MergeOptions,
 ): MergeResult {
-  const allFindings = dedupeFindings([...scanFindings, ...aiFindings])
+  const allFindings = dedupeFindings([...scanFindings, ...dropAiDuplicates(scanFindings, aiFindings)])
   const scored = opts?.onlyFiles ? allFindings.filter((f) => opts.onlyFiles!.has(f.file)) : allFindings
   const excludedCount = allFindings.length - scored.length
 

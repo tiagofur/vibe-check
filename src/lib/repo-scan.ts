@@ -526,6 +526,9 @@ export function scanRepo(files: RepoFile[], opts: ScanOptions = {}): ScanResult 
       }
       fileSecrets++
       secretCount++
+      // evidencia enmascarada: suficiente para ubicar el valor, nunca para filtrarlo
+      const evidence =
+        m[0].length > 12 ? `${m[0].slice(0, 4)}••••••${m[0].slice(-4)}` : '•'.repeat(m[0].length)
       findings.push(
         makeFinding(
           f.path,
@@ -533,7 +536,7 @@ export function scanRepo(files: RepoFile[], opts: ScanOptions = {}): ScanResult 
           'security',
           title,
           [matchIdx + 1],
-          `Se detectó "${title}" dentro del repositorio. Si el repo es público, la credencial ya debe considerarse comprometida.${note}`,
+          `Se detectó "${title}" — evidencia enmascarada: \`${evidence}\`. Si el repo es público, la credencial ya debe considerarse comprometida.${note}`,
           'Revoca la credencial inmediatamente, muévela a variables de entorno (.env excluido del repo) y limpia el historial de git si hace falta.',
         ),
       )

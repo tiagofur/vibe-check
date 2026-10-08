@@ -206,3 +206,17 @@ Work Log:
 
 Stage Summary:
 - VibeCheck entiende monorepos: manifiesto = unión del árbol, aliases por paquete con resolución relativa, y paquetes internos usados vía paths cuentan como usados. Los secretos de demo (canónicos o declarados fake) ya no clavan el score en crítico. El reporte de dev_deck pasó de "PELIGRO por errores de la herramienta" a "CASI LISTO con hallazgos reales": 3 .env commiteados, PluginGallery muerto y 2 deps sin uso por verificar.
+
+---
+Task ID: 13
+Agent: ZCode (GLM)
+Task: Las 3 sugerencias de producto del review externo del reporte viejo de dev_deck — evidencia, severidad y doble conteo. (Aclaración: el reporte que analiza ya estaba arreglado en Task 12.)
+
+Work Log:
+- Doble conteo (verificado con código): los structural checks NO puntúan (solo informan); el score viene solo de hallazgos. dedupeFindings existía pero solo por título idéntico — "AWS Access Key" (scan) y "Credencial AWS expuesta" (IA) contaban dos veces. Fix: dropAiDuplicates en repo-score — un hallazgo IA con mismo archivo+categoría y líneas a ±2 de uno del scan se descarta (el scan es la fuente autoritativa y verificable; el crítico inflado de IA ya no puede clavar el techo duro por duplicación). Con scan sin líneas: dedupe conservador.
+- Evidencia (punto A): los hallazgos de secretos ahora traen evidencia ENMASCARADA en la explicación (4 primeros + 6 puntos + 4 últimos chars) — el reporte permite ubicar y verificar el hallazgo sin filtrar el valor.
+- Severidad (punto B): ya calibrada por diseño — degradaciones de demo/test/fixture (Task 12), scan con origen 'ai' marcado en UI/CLI, techos duros, y ahora el dedupe evita que la IA escale severidad duplicando un hallazgo del scan.
+- Tests: +3 (dedupe doble conteo con score, dropAiDuplicates cerca/lejos, evidencia enmascarada). 145 tests, tsc/eslint/build limpios.
+
+Stage Summary:
+- Cada punto perdido tiene justificación defendible: sin doble conteo scan/IA, con evidencia enmascarada por hallazgo de secreto, y severidades que la herramienta misma degrada cuando el contexto dice "es un ejemplo". El benchmark formal recall/precision con ground truth queda como roadmap (el fixture plantado + 145 tests son el embrión).
