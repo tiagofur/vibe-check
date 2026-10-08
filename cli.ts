@@ -120,12 +120,22 @@ async function main() {
   if (llm) {
     const contentFiles = scanned.filter((f) => f.content.length > 0)
     const selection = selectAuditFiles(contentFiles, scan.checks.manifestName)
+    const totalBatches = selection.batches.length
     aiAuditedCount = selection.auditedPaths.length
-    console.error(`🤖 IA: ${llm.provider} · ${llm.model} — auditando ${selection.auditedPaths.length} archivos en ${selection.batches.length} lote(s)…`)
+    console.error(`🤖 IA: ${llm.provider} · ${llm.model} — auditando ${selection.auditedPaths.length} archivos en ${totalBatches} lote(s)…`)
+    let batchesFailed = 0
     for (const batch of selection.batches) {
-      for (const f of await auditBatch(llm, scanned.map((x) => x.path), batch)) {
-        aiRaw.push({ ...f, origin: 'ai' })
+      try {
+        for (const f of await auditBatch(llm, scanned.map((x) => x.path), batch)) {
+          aiRaw.push({ ...f, origin: 'ai' })
+        }
+      } catch (e) {
+        batchesFailed++
+        console.error(`⚠️  Un lote de IA falló (${e instanceof Error ? e.message : e}) — ese lote solo tiene escaneo determinista.`)
       }
+    }
+    if (totalBatches > 0 && batchesFailed === totalBatches) {
+      console.error(`⚠️  Los ${totalBatches} lotes de IA fallaron — resultados solo del escaneo determinista.`)
     }
     narrative = await synthesizeReport(llm, {
       repoName: name,

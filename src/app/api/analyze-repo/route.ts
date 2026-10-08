@@ -473,6 +473,7 @@ async function runAudit(
   const aiRaw: RepoFinding[] = []
   let engine: 'ia' | 'determinista' = 'ia'
   let auditedPaths: string[] = []
+  let batchesFailed = 0
   let llm: LlmClient | null = null
   try {
     llm = await getLLM()
@@ -498,7 +499,6 @@ async function runAudit(
 
   if (llm) {
     const selection = selectAuditFiles(auditPool, scan.checks.manifestName)
-    auditedPaths = selection.auditedPaths
     const totalBatches = selection.batches.length
     for (let i = 0; i < totalBatches; i++) {
       const batch = selection.batches[i]
@@ -509,10 +509,35 @@ async function runAudit(
         pct: 30 + Math.round(40 * (i / Math.max(1, totalBatches))),
         message: `Auditando con IA (${llm.provider} · ${llm.model}): lote ${i + 1} de ${totalBatches} (${batch.length} archivos${changed ? ' cambiados' : ' críticos'})…`,
       })
-      const raw = await auditBatch(llm, treePreview, batch)
-      for (const f of raw) {
-        aiRaw.push({ ...f, origin: 'ai' })
+      try {
+        const raw = await auditBatch(llm, treePreview, batch)
+        for (const f of raw) {
+          aiRaw.push({ ...f, origin: 'ai' })
+        }
+        auditedPaths.push(...batch.map((f) => f.path))
+      } catch (batchError) {
+        // un lote que falla no se traga: visible en el progreso y en el reporte
+        batchesFailed++
+        const msg = batchError instanceof Error ? batchError.message : String(batchError)
+        console.error(`[vibecheck] lote IA ${i + 1}/${totalBatches} falló:`, msg)
+        emit({
+          type: 'progress',
+          phase: 'ia',
+          pct: 30 + Math.round(40 * ((i + 1) / Math.max(1, totalBatches))),
+          message: `⚠️ El lote ${i + 1} de IA falló (${msg.slice(0, 120)}) — ese lote solo tiene escaneo determinista`,
+        })
       }
+    }
+    if (totalBatches > 0 && batchesFailed === totalBatches) {
+      // la IA no aportó nada: el reporte no puede venderse como "con IA"
+      engine = 'determinista'
+      llm = null
+      emit({
+        type: 'progress',
+        phase: 'ia',
+        pct: 45,
+        message: `⚠️ Los ${totalBatches} lotes de IA fallaron — reporte solo con el motor determinista`,
+      })
     }
   }
 
@@ -521,7 +546,12 @@ async function runAudit(
     type: 'progress',
     phase: 'sintesis',
     pct: 78,
-    message: engine === 'ia' ? 'Redactando el veredicto del repo…' : 'Veredicto determinista del repo…',
+    message:
+      engine === 'ia'
+        ? batchesFailed > 0
+          ? `Redactando el veredicto del repo (⚠️ ${batchesFailed} lote(s) de IA fallaron)…`
+          : 'Redactando el veredicto del repo…'
+        : 'Veredicto determinista del repo…',
   })
   let reduced: ReduceResult | null = null
   if (llm) {

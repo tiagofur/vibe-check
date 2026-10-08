@@ -173,3 +173,18 @@ Work Log:
 
 Stage Summary:
 - "¿Cómo reviso mi app con IA?" ahora tiene respuesta de una línea: bun cli.ts <carpeta> --ai (o la web, que ya la tenía). El CLI ya no es determinista-only: mismo motor de IA que la API, sin servidor ni base de datos, con la key del .env.
+
+---
+Task ID: 11
+Agent: ZCode (GLM)
+Task: Visibilidad de fallos de IA — "¿cómo sabemos que la IA está funcionando y si falla avisa?" El usuario la hizo mientras corria una auditoria real.
+
+Work Log:
+- Hueco encontrado: auditBatch se tragaba los errores (console.error + return []) — un lote que fallaba (rate limit del router free, modelo que devuelve prosa) dejaba 0 hallazgos IA y el reporte igual se vendia como "con IA".
+- repo-llm.ts: auditBatch ya no captura — propaga al caller (console.error del caller informa).
+- analyze-repo/route.ts: try/catch por lote → evento de progreso "⚠️ El lote N de IA falló (<error real>) — ese lote solo tiene escaneo determinista"; auditedPaths ahora solo cuenta lotes EXITOSOS (filesAudited honesto); si fallan TODOS los lotes → engine='determinista' (badge ⚡ honesto) + aviso; fallo parcial → la fase de síntesis lo anuncia "(⚠️ N lote(s) de IA fallaron)".
+- cli.ts: mismo tratamiento — warning por lote a stderr + "Los N lotes de IA fallaron" si es total.
+- tests/cli-ai.test.ts: 4º test con mock que responde 500 — aserta el aviso por lote con el error real en stderr, el aviso de fallo total y la ausencia del hallazgo mock. 136 tests.
+
+Stage Summary:
+- La IA ya no puede fallar en silencio: fallo de lote es visible en vivo (progreso NDJSON o stderr), filesAudited mide lotes exitosos y el badge solo dice "con IA" si la IA aportó algo.

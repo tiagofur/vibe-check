@@ -18,11 +18,14 @@ function runCli(args: string[], env: Record<string, string>) {
 
 // El mock corre en un PROCESO aparte: si viviera en este worker, spawnSync
 // bloquearía el event loop y el fetch del CLI nunca recibiría respuesta.
-let mock: ChildProcess | null = null
+const mockChildren: ChildProcess[] = []
 let baseUrl = ''
+let failUrl = ''
 
-beforeAll(async () => {
-  const script = `
+function spawnMock(response: 'ok' | 'fail'): Promise<string> {
+  const script =
+    response === 'ok'
+      ? `
     const { createServer } = require('node:http')
     const body = JSON.stringify({
       choices: [{
@@ -50,19 +53,36 @@ beforeAll(async () => {
     })
     s.listen(0, '127.0.0.1', () => console.log('PORT ' + s.address().port))
   `
-  mock = spawn(process.execPath, ['-e', script])
-  baseUrl = await new Promise<string>((resolve, reject) => {
-    mock!.stdout!.on('data', (d: Buffer) => {
+      : `
+    const { createServer } = require('node:http')
+    const s = createServer((req, res) => {
+      req.resume()
+      req.on('end', () => {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'upstream saturado' }))
+      })
+    })
+    s.listen(0, '127.0.0.1', () => console.log('PORT ' + s.address().port))
+  `
+  const child = spawn(process.execPath, ['-e', script])
+  mockChildren.push(child)
+  return new Promise<string>((resolve, reject) => {
+    child.stdout!.on('data', (d: Buffer) => {
       const m = String(d).match(/PORT (\d+)/)
       if (m) resolve(`http://127.0.0.1:${m[1]}/v1/chat/completions`)
     })
-    mock!.on('exit', (code) => reject(new Error(`el mock LLM murió (${code})`)))
+    child.on('exit', (code) => reject(new Error(`el mock LLM murió (${code})`)))
     setTimeout(() => reject(new Error('el mock LLM no levantó')), 10_000)
   })
-}, 15_000)
+}
+
+beforeAll(async () => {
+  baseUrl = await spawnMock('ok')
+  failUrl = await spawnMock('fail')
+}, 20_000)
 
 afterAll(() => {
-  mock?.kill()
+  for (const c of mockChildren) c.kill()
 })
 
 describe('cli.ts --ai', () => {
@@ -100,5 +120,21 @@ describe('cli.ts --ai', () => {
     expect(out.ai.filesAudited).toBeGreaterThan(0)
     expect(out.ai.findings).toBeGreaterThan(0)
     expect(out.summary).toBeTruthy()
+  })
+
+  it('si el endpoint de IA falla, avisa por lote y no se lo calla', () => {
+    const r = runCli(['--ai'], {
+      LLM_PROVIDER: 'openai',
+      OPENAI_API_KEY: 'test-key',
+      LLM_BASE_URL: failUrl,
+    })
+    // el fixture igual puntúa por el escaneo determinista
+    expect(r.status).toBe(1)
+    // stderr (no el reporte): cada lote fallido avisado con el error real
+    expect(r.stderr).toContain('lote de IA falló')
+    expect(r.stderr).toContain('respondió 500')
+    expect(r.stderr).toContain('Los 1 lotes de IA fallaron')
+    // el hallazgo del mock bueno NO aparece (nunca hubo IA exitosa)
+    expect(r.stdout).not.toContain('HALLAZGO-MOCK-IA')
   })
 })

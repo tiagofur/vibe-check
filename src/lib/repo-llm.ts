@@ -153,44 +153,40 @@ export async function auditBatch(
     .map((f) => `===== FILE: ${f.path} =====\n${f.content}`)
     .join('\n\n')
   const user = `Árbol del repo (contexto, recortado):\n${treePreview.slice(0, 80).join('\n')}\n\nArchivos a auditar en este lote:\n\n${filesText}`
-  try {
-    const parsed = await chatJSON(llm, [
-      { role: 'assistant', content: AUDIT_SYSTEM },
-      { role: 'user', content: user },
-    ])
-    const raw = Array.isArray(parsed.findings) ? parsed.findings : []
-    const validPaths = new Set(batch.map((f) => f.path))
-    const out: RawAIFinding[] = []
-    for (const item of raw.slice(0, 20)) {
-      if (typeof item !== 'object' || item === null) continue
-      const f = item as Record<string, unknown>
-      const file = typeof f.file === 'string' ? f.file : ''
-      const severity = ['critical', 'high', 'medium', 'low', 'info'].includes(String(f.severity))
-        ? (f.severity as Severity)
-        : 'medium'
-      const category = (['security', 'hallucination', 'bugs', 'overengineering'] as const).includes(
-        f.category as CategoryKey,
-      )
-        ? (f.category as CategoryKey)
-        : 'bugs'
-      if (!validPaths.has(file)) continue
-      out.push({
-        file,
-        lines: Array.isArray(f.lines)
-          ? f.lines.filter((n): n is number => typeof n === 'number').slice(0, 8)
-          : [],
-        severity,
-        category,
-        title: String(f.title ?? 'Hallazgo').slice(0, 120),
-        explanation: String(f.explanation ?? '').slice(0, 400),
-        fix: String(f.fix ?? '').slice(0, 400),
-      })
-    }
-    return out
-  } catch (e) {
-    console.error('[vibecheck] batch audit failed:', e)
-    return []
+  // sin try/catch a propósito: el caller informa el fallo (lote visible en el progreso)
+  const parsed = await chatJSON(llm, [
+    { role: 'assistant', content: AUDIT_SYSTEM },
+    { role: 'user', content: user },
+  ])
+  const raw = Array.isArray(parsed.findings) ? parsed.findings : []
+  const validPaths = new Set(batch.map((f) => f.path))
+  const out: RawAIFinding[] = []
+  for (const item of raw.slice(0, 20)) {
+    if (typeof item !== 'object' || item === null) continue
+    const f = item as Record<string, unknown>
+    const file = typeof f.file === 'string' ? f.file : ''
+    const severity = ['critical', 'high', 'medium', 'low', 'info'].includes(String(f.severity))
+      ? (f.severity as Severity)
+      : 'medium'
+    const category = (['security', 'hallucination', 'bugs', 'overengineering'] as const).includes(
+      f.category as CategoryKey,
+    )
+      ? (f.category as CategoryKey)
+      : 'bugs'
+    if (!validPaths.has(file)) continue
+    out.push({
+      file,
+      lines: Array.isArray(f.lines)
+        ? f.lines.filter((n): n is number => typeof n === 'number').slice(0, 8)
+        : [],
+      severity,
+      category,
+      title: String(f.title ?? 'Hallazgo').slice(0, 120),
+      explanation: String(f.explanation ?? '').slice(0, 400),
+      fix: String(f.fix ?? '').slice(0, 400),
+    })
   }
+  return out
 }
 
 export interface ReduceResult {
