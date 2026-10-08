@@ -20,6 +20,7 @@ import {
 } from '@/lib/vibe-types'
 import type { RepoFinding, RepoReport, StructuralCheck } from '@/lib/repo-types'
 import { explainScore } from '@/lib/repo-score'
+import { roastRepo, roastToMarkdown, signalsFromReport } from '@/lib/roast'
 import { computeTrend, trendArrow, type TrendPoint } from '@/lib/trend'
 import { TrendSparkline } from '@/components/vibe/trend-sparkline'
 import { ScoreGauge, MiniRing } from '@/components/vibe/score-gauge'
@@ -27,6 +28,7 @@ import {
   Check,
   Copy,
   FileCode2,
+  Flame,
   FolderGit2,
   GitBranch,
   GitCompare,
@@ -169,6 +171,17 @@ export function RepoReportView({
     () => report.scoreExplanation ?? explainScore(report.categories, report.score),
     [report],
   )
+  const [roastOpen, setRoastOpen] = useState(false)
+  const roast = useMemo(
+    () =>
+      roastRepo({
+        repoName: report.repoName,
+        verdict: report.verdict,
+        signals: signalsFromReport(report),
+        diff: report.diff ?? null,
+      }),
+    [report],
+  )
 
   const findingsByFile = useMemo(() => {
     const map = new Map<string, RepoFinding[]>()
@@ -196,6 +209,15 @@ export function RepoReportView({
     try {
       await navigator.clipboard.writeText(buildRepoMarkdown(report))
       toast({ title: '📋 Reporte copiado', description: 'Pégalo en tu PR, issue o Discord.' })
+    } catch {
+      toast({ title: 'No se pudo copiar', variant: 'destructive' })
+    }
+  }
+
+  const copyRoast = async () => {
+    try {
+      await navigator.clipboard.writeText(roastToMarkdown(report.repoName, roast))
+      toast({ title: '🔥 Roast copiado', description: 'Compártelo… bajo tu propia responsabilidad.' })
     } catch {
       toast({ title: 'No se pudo copiar', variant: 'destructive' })
     }
@@ -292,6 +314,14 @@ export function RepoReportView({
                 <div className="flex flex-wrap items-center justify-center gap-2 pt-1 lg:justify-start">
                   <Button size="sm" variant="outline" onClick={copyReport} className="gap-1.5">
                     <Copy className="size-3.5" /> Copiar reporte MD
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setRoastOpen((v) => !v)}
+                    className={`gap-1.5 ${roastOpen ? 'border-orange-500/50 text-orange-400' : ''}`}
+                  >
+                    <Flame className="size-3.5" /> {roastOpen ? 'Ocultar roast' : 'Modo roast'}
                   </Button>
                   <Button size="sm" onClick={onNewCheck} className="gap-1.5 bg-emerald-600 hover:bg-emerald-700">
                     <FileCode2 className="size-3.5" /> Auditar otro repo
@@ -522,6 +552,34 @@ export function RepoReportView({
                   </Accordion>
                 </div>
               ))}
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
+
+      {/* ── Modo roast (humor, separado del reporte serio) ──── */}
+      {roastOpen && (
+        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+          <Card className="border-orange-500/30 bg-gradient-to-br from-orange-500/10 via-zinc-900/60 to-red-500/10">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base text-orange-300">
+                <Flame className="size-4" aria-hidden /> Modo roast
+              </CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Humor, no evidencia: el reporte serio está arriba. Mismo repo, mismo roast — es determinista como todo lo demás aquí.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {roast.map((line, i) => (
+                <p key={i} className="text-sm leading-relaxed text-foreground/90">
+                  🔥 {line}
+                </p>
+              ))}
+              <div className="pt-1">
+                <Button size="sm" variant="outline" onClick={copyRoast} className="gap-1.5 border-orange-500/40 text-orange-300 hover:text-orange-200">
+                  <Copy className="size-3.5" /> Copiar roast MD
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </motion.div>

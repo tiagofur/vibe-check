@@ -14,6 +14,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve, relative } from 'node:path'
 import { isScannablePath, scanRepo, SKIP_DIRS } from './src/lib/repo-scan'
 import { mergeAndScore, explainScore } from './src/lib/repo-score'
+import { roastRepo } from './src/lib/roast'
 import { CATEGORY_META, SEVERITY_META, VERDICT_META, verdictFromScore, type CategoryKey } from './src/lib/vibe-types'
 import type { RepoFile } from './src/lib/repo-types'
 
@@ -37,10 +38,12 @@ function walkDir(dir: string, root: string, out: RepoFile[]): void {
 }
 
 function usage(): never {
-  console.error(`Uso: bun cli.ts <carpeta> [--json]
+  console.error(`Uso: bun cli.ts <carpeta> [--json] [--roast] [--exclude <ruta>]
 
 Opciones:
-  --json   Salida JSON (para CI u otros herramientas)
+  --json             Salida JSON (para CI u otras herramientas)
+  --roast            Añade el modo roast 🔥 (humor determinista, no evidencia)
+  --exclude <ruta>   Excluye rutas del escaneo (repetible, ej. tests/fixtures)
 
 Exit codes: 0 = SHIP IT / CASI LISTO · 1 = SOSPECHOSO / PELIGRO o error`)
   process.exit(1)
@@ -49,7 +52,21 @@ Exit codes: 0 = SHIP IT / CASI LISTO · 1 = SOSPECHOSO / PELIGRO o error`)
 async function main() {
   const args = process.argv.slice(2)
   const asJson = args.includes('--json')
-  const target = args.find((a) => !a.startsWith('--'))
+  const asRoast = args.includes('--roast')
+  const excludes: string[] = []
+  const positional: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (arg === '--exclude') {
+      const val = args[i + 1]
+      if (!val || val.startsWith('--')) usage()
+      excludes.push(val!)
+      i++
+    } else if (arg && !arg.startsWith('--')) {
+      positional.push(arg)
+    }
+  }
+  const target = positional[0]
   if (!target) usage()
 
   const root = resolve(target!)
@@ -60,16 +77,35 @@ async function main() {
 
   const files: RepoFile[] = []
   walkDir(root, root, files)
-  if (files.length === 0) {
+  const scanned =
+    excludes.length > 0
+      ? files.filter((f) => !excludes.some((ex) => f.path === ex || f.path.startsWith(`${ex}/`)))
+      : files
+  if (scanned.length === 0) {
     console.error('Ningún archivo escaneable (¿solo binarios o node_modules?).')
     process.exit(1)
   }
 
-  const scan = scanRepo(files)
+  const scan = scanRepo(scanned)
   const { categories, score } = mergeAndScore(scan.findings, [])
   const explanation = explainScore(categories, score)
   const verdict = verdictFromScore(score)
   const name = root.split('/').pop() ?? root
+  const roast = asRoast
+    ? roastRepo({
+        repoName: name,
+        verdict,
+        signals: {
+          secrets: scan.checks.secretCount,
+          envCommitted: scan.checks.envFiles.length,
+          phantomDeps: scan.checks.missingDeps.length,
+          brokenImports: scan.checks.brokenImports.length,
+          unusedDeps: scan.checks.unusedDeps.length,
+          orphans: scan.checks.orphanFiles.length,
+          fakeTests: scan.checks.suspiciousTestFiles.length,
+        },
+      })
+    : null
 
   if (asJson) {
     console.log(
@@ -79,10 +115,11 @@ async function main() {
           score,
           verdict,
           mode: 'determinista (sin IA)',
-          stats: { filesScanned: files.length, totalLines: scan.stats.totalLines, languages: scan.stats.languages },
+          stats: { filesScanned: scanned.length, totalLines: scan.stats.totalLines, languages: scan.stats.languages },
           checks: scan.checks,
           categories,
           scoreExplanation: explanation,
+          ...(roast ? { roast } : {}),
         },
         null,
         2,
@@ -91,7 +128,7 @@ async function main() {
   } else {
     const v = VERDICT_META[verdict]
     console.log(`🕵️ VibeCheck — auditoría determinista (sin IA)`)
-    console.log(`Repo: ${name} · ${files.length} archivos · ${scan.stats.totalLines} líneas`)
+    console.log(`Repo: ${name} · ${scanned.length} archivos · ${scan.stats.totalLines} líneas`)
     if (scan.stats.languages.length) console.log(`Lenguajes: ${scan.stats.languages.join(', ')}`)
     console.log('')
     console.log(`  Vibe Score: ${score}/100 — ${v.emoji} ${verdict}`)
@@ -123,6 +160,11 @@ async function main() {
         console.log(`       ${f.explanation}`)
         console.log(`       Fix: ${f.fix}`)
       }
+    }
+    if (roast) {
+      console.log('')
+      console.log('  🔥 Modo roast (humor, no evidencia):')
+      for (const line of roast) console.log(`   • ${line}`)
     }
     console.log('')
     console.log('  Modo determinista: reproducible, cero IA. Auditoría completa con IA en la app web.')
