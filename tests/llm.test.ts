@@ -46,10 +46,10 @@ const messages: ChatMessage[] = [
 
 describe('buildChatRequest · wire format OpenAI-compatible', () => {
   it('gemini: endpoint correcto, system normalizado y Bearer auth', () => {
-    const req = buildChatRequest(specOf('gemini'), 'key-g', 'gemini-2.5-flash', messages)
+    const req = buildChatRequest(specOf('gemini'), 'key-g', 'gemini-3.8-flash', messages)
     expect(req.url).toContain('generativelanguage.googleapis.com')
     expect(req.headers.Authorization).toBe('Bearer key-g')
-    expect(req.body.model).toBe('gemini-2.5-flash')
+    expect(req.body.model).toBe('gemini-3.8-flash')
     // el primer mensaje 'assistant' del SDK legacy viaja como 'system'
     expect(req.body.messages).toEqual([
       { role: 'system', content: 'SYSTEM PROMPT' },
@@ -62,13 +62,13 @@ describe('buildChatRequest · wire format OpenAI-compatible', () => {
 
   it('zai (GLM): manda thinking disabled y respeta ZAI_BASE_URL', () => {
     process.env.ZAI_BASE_URL = 'https://mi-proxy.ejemplo.com/v4/chat/completions'
-    const req = buildChatRequest(specOf('zai'), 'key-z', 'glm-4.6', messages)
+    const req = buildChatRequest(specOf('zai'), 'key-z', 'glm-5.3-flash', messages)
     expect(req.body.thinking).toEqual({ type: 'disabled' })
     expect(req.url).toBe('https://mi-proxy.ejemplo.com/v4/chat/completions')
   })
 
   it('anthropic: headers x-api-key + anthropic-version y max_tokens obligatorio', () => {
-    const req = buildChatRequest(specOf('anthropic'), 'key-a', 'claude-haiku-4-5', messages)
+    const req = buildChatRequest(specOf('anthropic'), 'key-a', 'claude-haiku-5.5', messages)
     expect(req.url).toContain('api.anthropic.com')
     expect(req.headers['x-api-key']).toBe('key-a')
     expect(req.headers['anthropic-version']).toBeTruthy()
@@ -76,7 +76,7 @@ describe('buildChatRequest · wire format OpenAI-compatible', () => {
   })
 
   it('openrouter: attribution headers presentes', () => {
-    const req = buildChatRequest(specOf('openrouter'), 'key-o', 'google/gemini-2.5-flash', messages)
+    const req = buildChatRequest(specOf('openrouter'), 'key-o', 'openrouter/free', messages)
     expect(req.url).toContain('openrouter.ai')
     expect(req.headers['X-Title']).toBeTruthy()
     expect(req.headers['HTTP-Referer']).toBeTruthy()
@@ -84,7 +84,7 @@ describe('buildChatRequest · wire format OpenAI-compatible', () => {
 
   it('LLM_BASE_URL global overridea el endpoint de cualquier provider', () => {
     process.env.LLM_BASE_URL = 'https://gateway.interno/v1/chat/completions'
-    const req = buildChatRequest(specOf('openai'), 'k', 'gpt-5-mini', messages)
+    const req = buildChatRequest(specOf('openai'), 'k', 'gpt-6-luna', messages)
     expect(req.url).toBe('https://gateway.interno/v1/chat/completions')
   })
 
@@ -115,7 +115,7 @@ describe('getLLM · selección de provider por entorno', () => {
     process.env.OPENAI_API_KEY = 'o'
     const llm = await getLLM({ tryLegacySdk: false })
     expect(llm?.provider).toBe('gemini')
-    expect(llm?.model).toBe('gemini-2.5-flash')
+    expect(llm?.model).toBe('gemini-3.8-flash')
   })
 
   it('cada provider con su sola key es seleccionable', async () => {
@@ -177,8 +177,8 @@ describe('getLLM · selección de provider por entorno', () => {
 
   it('LLM_MODEL overridea el default del provider', async () => {
     process.env.GEMINI_API_KEY = 'g'
-    process.env.LLM_MODEL = 'gemini-2.5-flash-lite'
+    process.env.LLM_MODEL = 'gemini-3.5-flash-lite'
     const llm = await getLLM({ tryLegacySdk: false })
-    expect(llm?.model).toBe('gemini-2.5-flash-lite')
+    expect(llm?.model).toBe('gemini-3.5-flash-lite')
   })
 })

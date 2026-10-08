@@ -98,11 +98,11 @@ La capa de IA habla el dialecto OpenAI (chat completions) y auto-detecta el prim
 
 | Key (env) | Provider | Modelo default | Por qué |
 |---|---|---|---|
-| `GEMINI_API_KEY` | Google AI Studio | `gemini-2.5-flash` | Free tier generoso, flash barato |
-| `OPENROUTER_API_KEY` | OpenRouter | `google/gemini-2.5-flash` | Una key, cientos de modelos |
-| `OPENAI_API_KEY` | OpenAI | `gpt-5-mini` | El tier económico "mini" |
-| `ANTHROPIC_API_KEY` | Anthropic | `claude-haiku-4-5` | Haiku: rápido y barato |
-| `ZAI_API_KEY` | Z.ai (GLM) | `glm-4.6` | La misma familia del SDK original |
+| `GEMINI_API_KEY` | Google AI Studio | `gemini-3.8-flash` | Free tier generoso; el flash más nuevo |
+| `OPENROUTER_API_KEY` | OpenRouter | `openrouter/free` | Una key; el router gratis elige un modelo `$0` disponible — fijá uno con `LLM_MODEL` |
+| `OPENAI_API_KEY` | OpenAI | `gpt-6-luna` | El tier económico de la familia GPT-6 |
+| `ANTHROPIC_API_KEY` | Anthropic | `claude-haiku-5.5` | Haiku: rápido y barato |
+| `ZAI_API_KEY` | Z.ai (GLM) | `glm-5.3-flash` | La misma familia del SDK original |
 | `OLLAMA_MODEL` | Ollama (local) | — | Tu código nunca sale de la máquina |
 
 Extras: `LLM_PROVIDER` fuerza un proveedor (`none` apaga la IA), `LLM_BASE_URL` apunta a un proxy/gateway, y el SDK legacy con `.z-ai-config` sigue funcionando como último recurso. Las keys se leen solo del lado del servidor y nunca llegan al navegador.

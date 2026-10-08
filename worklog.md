@@ -147,3 +147,16 @@ Work Log:
 
 Stage Summary:
 - VibeCheck deja de depender del sandbox Z.ai para tener IA: cualquier key de Gemini/OpenRouter/OpenAI/Anthropic/GLM/Ollama enciende el auditor completo, con defaults baratos y fallback determinista siempre de por medio. La Action de PR (docs/vibecheck-action.yml) ahora es desplegable con una sola GEMINI_API_KEY en la instancia.
+
+---
+Task ID: 9
+Agent: ZCode (GLM)
+Task: Actualizar los defaults de modelos a la generación actual (verificado contra catálogos reales, oct 2026) y adoptar el router gratis de OpenRouter.
+
+Work Log:
+- Investigación con fuentes vivas: catálogo público de OpenRouter (/api/v1/models, 468 ids con precios reales) y docs de Google AI Studio. Defaults anteriores eran una generación vieja.
+- Nuevos defaults en llm.ts: gemini → gemini-3.8-flash (nuevo flash estable; en OpenRouter $0.75/$3.75 por M — más nuevo Y más barato que 3.5-flash); openrouter → openrouter/free (router oficial que elige al azar un modelo :free disponible, $0; se puede fijar uno con LLM_MODEL, ej. nvidia/nemotron-3-ultra-550b-a55b:free); openai → gpt-6-luna ($0.10/$0.50, el "luna" que el usuario señalaba como barato); anthropic → claude-haiku-5.5 ($0.10/$0.50); zai → glm-5.3-flash ($0.15/$0.50, la generación que impulsa el propio CLI de este entorno).
+- READMEs + .env.example actualizados con la tabla nueva y la nota del router free. Tests re-anclados a los defaults nuevos. 132 tests, tsc/eslint limpios.
+
+Stage Summary:
+- Los defaults ya no envejecen a ciegas: quedaron anclados a precios y ids verificados en los catálogos vivos, con el router gratuito de OpenRouter como default del provider "muchos modelos".

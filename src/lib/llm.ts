@@ -42,21 +42,26 @@ interface ProviderSpec {
   maxTokens?: number
 }
 
-// Defaults de entrada: el modelo barato/bueno de cada casa. Cualquiera se
-// overridea con LLM_MODEL (o el modelEnv del provider).
+// Defaults verificados contra los catálogos reales (2026-10) y el tier
+// económico de cada casa. Cualquiera se overridea con LLM_MODEL (o el
+// modelEnv del provider). Precios de referencia vía OpenRouter ($/M tokens):
+//   gpt-6-luna $0.10/$0.50 · claude-haiku-5.5 $0.10/$0.50 ·
+//   glm-5.3-flash $0.15/$0.50 · gemini-3.8-flash $0.75/$3.75
 const SPECS: ProviderSpec[] = [
   {
     name: 'gemini',
     keyEnv: ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY'],
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-    defaultModel: 'gemini-2.5-flash',
+    defaultModel: 'gemini-3.8-flash',
     headers: (k) => ({ Authorization: `Bearer ${k}` }),
   },
   {
     name: 'openrouter',
     keyEnv: ['OPENROUTER_API_KEY'],
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    defaultModel: 'google/gemini-2.5-flash',
+    // router oficial: elige al azar entre los modelos :free disponibles ($0);
+    // para fijar uno: LLM_MODEL="nvidia/nemotron-3-ultra-550b-a55b:free"
+    defaultModel: 'openrouter/free',
     headers: (k) => ({
       Authorization: `Bearer ${k}`,
       'HTTP-Referer': 'https://github.com/tiagofur/vibe-check',
@@ -67,14 +72,14 @@ const SPECS: ProviderSpec[] = [
     name: 'openai',
     keyEnv: ['OPENAI_API_KEY'],
     endpoint: 'https://api.openai.com/v1/chat/completions',
-    defaultModel: 'gpt-5-mini',
+    defaultModel: 'gpt-6-luna',
     headers: (k) => ({ Authorization: `Bearer ${k}` }),
   },
   {
     name: 'anthropic',
     keyEnv: ['ANTHROPIC_API_KEY'],
     endpoint: 'https://api.anthropic.com/v1/chat/completions',
-    defaultModel: 'claude-haiku-4-5',
+    defaultModel: 'claude-haiku-5.5',
     maxTokens: 8192,
     headers: (k) => ({
       'x-api-key': k,
@@ -87,7 +92,7 @@ const SPECS: ProviderSpec[] = [
     keyEnv: ['ZAI_API_KEY', 'ZHIPU_API_KEY'],
     endpoint: 'https://api.z.ai/api/paas/v4/chat/completions',
     baseUrlEnv: 'ZAI_BASE_URL',
-    defaultModel: 'glm-4.6',
+    defaultModel: 'glm-5.3-flash',
     thinkingDisabled: true,
     headers: (k) => ({ Authorization: `Bearer ${k}` }),
   },

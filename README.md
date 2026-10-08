@@ -98,11 +98,11 @@ The AI layer speaks the OpenAI chat-completions dialect and auto-detects the fir
 
 | Key (env) | Provider | Default model | Why |
 |---|---|---|---|
-| `GEMINI_API_KEY` | Google AI Studio | `gemini-2.5-flash` | Generous free tier, cheap flash tier |
-| `OPENROUTER_API_KEY` | OpenRouter | `google/gemini-2.5-flash` | One key, hundreds of models |
-| `OPENAI_API_KEY` | OpenAI | `gpt-5-mini` | The cheap "mini" tier |
-| `ANTHROPIC_API_KEY` | Anthropic | `claude-haiku-4-5` | Haiku: fast and cheap |
-| `ZAI_API_KEY` | Z.ai (GLM) | `glm-4.6` | Same model family as the original SDK |
+| `GEMINI_API_KEY` | Google AI Studio | `gemini-3.8-flash` | Generous free tier; newest flash |
+| `OPENROUTER_API_KEY` | OpenRouter | `openrouter/free` | One key; the free router picks any available `$0` model — pin one with `LLM_MODEL` |
+| `OPENAI_API_KEY` | OpenAI | `gpt-6-luna` | The budget tier of the GPT-6 family |
+| `ANTHROPIC_API_KEY` | Anthropic | `claude-haiku-5.5` | Haiku: fast and cheap |
+| `ZAI_API_KEY` | Z.ai (GLM) | `glm-5.3-flash` | Same model family as the original SDK |
 | `OLLAMA_MODEL` | Ollama (local) | — | Your code never leaves the machine |
 
 Extras: `LLM_PROVIDER` forces a provider (`none` disables AI), `LLM_BASE_URL` points at a proxy/gateway, and the legacy `.z-ai-config` SDK still works as a last-resort fallback. Keys are read server-side only and never sent to the browser.
