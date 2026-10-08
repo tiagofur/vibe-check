@@ -4,8 +4,8 @@
 // mismos techos duros ante críticos.
 // ─────────────────────────────────────────────────────────────
 
-import type { RepoFinding, RepoReport } from './repo-types'
-import { CATEGORY_META, type CategoryKey, scoreFromFindings, verdictFromScore } from './vibe-types'
+import type { RepoFinding, RepoReport, ScoreDeduction, ScoreExplanation } from './repo-types'
+import { CATEGORY_META, SEVERITY_META, type CategoryKey, scoreFromFindings, verdictFromScore } from './vibe-types'
 
 const CATEGORY_KEYS: CategoryKey[] = ['security', 'hallucination', 'bugs', 'overengineering']
 const SEVERITY_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 }
@@ -66,3 +66,48 @@ export function mergeAndScore(
 }
 
 export { verdictFromScore }
+
+/**
+ * Atribución de puntos: dado el reporte por categorías y el score final,
+ * deduce cuánto costó cada grupo de hallazgos y si se aplicó un techo duro.
+ * Todo es derivable de `categories` + `score`, así que funciona también con
+ * reportes antiguos que no traigan `scoreExplanation`.
+ */
+export function explainScore(
+  categories: RepoReport['categories'],
+  score: number,
+): ScoreExplanation {
+  const groups = new Map<string, ScoreDeduction>()
+  let rawWeighted = 0
+  for (const key of CATEGORY_KEYS) {
+    const cat = categories[key]
+    if (!cat) continue
+    rawWeighted += cat.score * CATEGORY_META[key].weight
+    for (const f of cat.findings) {
+      const gkey = `${key}:${f.severity}`
+      const group = groups.get(gkey) ?? {
+        key: gkey,
+        category: key,
+        severity: f.severity,
+        count: 0,
+        cost: 0,
+      }
+      group.count += 1
+      group.cost += SEVERITY_META[f.severity]?.weight ?? 4
+      groups.set(gkey, group)
+    }
+  }
+  const deductions = [...groups.values()]
+    .map((g) => ({
+      ...g,
+      cost: Math.round(g.cost * CATEGORY_META[g.category].weight * 10) / 10,
+    }))
+    .sort((a, b) => b.cost - a.cost || b.count - a.count)
+
+  const raw = Math.round(rawWeighted)
+  const cap =
+    raw > score
+      ? { score, reason: `Techo duro por hallazgo crítico: el score se limita a ${score}` }
+      : null
+  return { score, rawWeighted: raw, cap, deductions }
+}

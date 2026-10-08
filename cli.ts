@@ -13,7 +13,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve, relative } from 'node:path'
 import { isScannablePath, scanRepo, SKIP_DIRS } from './src/lib/repo-scan'
-import { mergeAndScore } from './src/lib/repo-score'
+import { mergeAndScore, explainScore } from './src/lib/repo-score'
 import { CATEGORY_META, SEVERITY_META, VERDICT_META, verdictFromScore, type CategoryKey } from './src/lib/vibe-types'
 import type { RepoFile } from './src/lib/repo-types'
 
@@ -67,6 +67,7 @@ async function main() {
 
   const scan = scanRepo(files)
   const { categories, score } = mergeAndScore(scan.findings, [])
+  const explanation = explainScore(categories, score)
   const verdict = verdictFromScore(score)
   const name = root.split('/').pop() ?? root
 
@@ -81,6 +82,7 @@ async function main() {
           stats: { filesScanned: files.length, totalLines: scan.stats.totalLines, languages: scan.stats.languages },
           checks: scan.checks,
           categories,
+          scoreExplanation: explanation,
         },
         null,
         2,
@@ -98,6 +100,17 @@ async function main() {
     for (const key of Object.keys(categories) as CategoryKey[]) {
       const cat = categories[key]
       console.log(`  ${CATEGORY_META[key].icon} ${CATEGORY_META[key].label.padEnd(18)} ${String(cat.score).padStart(3)}/100 · ${cat.findings.length} hallazgo(s)`)
+    }
+    console.log('')
+    console.log(`  ¿Por qué ${score}/100?`)
+    if (explanation.deductions.length === 0 && !explanation.cap) {
+      console.log('   🎉 Nada que descontar: no se encontró ningún hallazgo.')
+    } else {
+      for (const d of explanation.deductions) {
+        const label = `${CATEGORY_META[d.category].label} (${SEVERITY_META[d.severity].label.toLowerCase()})`
+        console.log(`   • −${d.cost} pts · ${d.count} hallazgo(s) de ${label}`)
+      }
+      if (explanation.cap) console.log(`   • ⬆️ ${explanation.cap.reason}`)
     }
     const findings = (Object.keys(categories) as CategoryKey[]).flatMap((k) => categories[k].findings)
     if (findings.length > 0) {

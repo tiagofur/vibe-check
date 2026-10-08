@@ -16,7 +16,7 @@ import {
   scanRepo,
 } from '@/lib/repo-scan'
 import { changedPaths, diffTrees, type TreeDiff } from '@/lib/repo-diff'
-import { mergeAndScore, verdictFromScore } from '@/lib/repo-score'
+import { explainScore, mergeAndScore, verdictFromScore } from '@/lib/repo-score'
 import { auditBatch, selectAuditFiles, synthesizeReport } from '@/lib/repo-llm'
 import type { CategoryKey } from '@/lib/vibe-types'
 
@@ -535,6 +535,7 @@ async function runAudit(
     topRisks: reduced.topRisks,
     structural: buildStructuralChecks(scan.checks),
     categories,
+    scoreExplanation: explainScore(categories, mergedScore),
   }
 
   // ── 7. Persistir historial + caché (nunca los contenidos) ──

@@ -26,6 +26,25 @@ export interface StructuralCheck {
   count: number
 }
 
+/** Cuántos puntos del score final cuesta un grupo de hallazgos (categoría × severidad) */
+export interface ScoreDeduction {
+  key: string
+  category: CategoryKey
+  severity: Severity
+  count: number
+  /** puntos descontados: peso de severidad × peso de categoría (1 decimal) */
+  cost: number
+}
+
+/** Desglose "¿por qué N/100?": atribución de puntos + techos duros aplicados */
+export interface ScoreExplanation {
+  score: number
+  /** score antes de aplicar techos duros por hallazgos críticos */
+  rawWeighted: number
+  cap: { score: number; reason: string } | null
+  deductions: ScoreDeduction[]
+}
+
 export interface RepoReport {
   score: number
   verdict: Verdict
@@ -55,6 +74,8 @@ export interface RepoReport {
   topRisks: { title: string; detail: string; severity: Severity }[]
   structural: StructuralCheck[]
   categories: Record<CategoryKey, { score: number; summary: string; findings: RepoFinding[] }>
+  /** Presente en reportes nuevos: por qué el score es N (reportes cacheados viejos pueden omitirlo) */
+  scoreExplanation?: ScoreExplanation
 }
 
 export interface RepoCheckHistoryItem {

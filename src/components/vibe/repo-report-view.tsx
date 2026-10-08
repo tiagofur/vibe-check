@@ -19,6 +19,7 @@ import {
   type CategoryKey,
 } from '@/lib/vibe-types'
 import type { RepoFinding, RepoReport, StructuralCheck } from '@/lib/repo-types'
+import { explainScore } from '@/lib/repo-score'
 import { computeTrend, trendArrow, type TrendPoint } from '@/lib/trend'
 import { TrendSparkline } from '@/components/vibe/trend-sparkline'
 import { ScoreGauge, MiniRing } from '@/components/vibe/score-gauge'
@@ -58,8 +59,23 @@ function buildRepoMarkdown(report: RepoReport): string {
     `- ${report.stats.filesScanned} archivos escaneados · ${report.stats.filesAudited} auditados con IA · ${report.stats.totalLines} líneas`,
     `- Lenguajes: ${report.stats.languages.join(', ') || 'n/d'}`,
     '',
-    `## 🧪 Chequeos estructurales`,
+    `## 🧮 ¿Por qué ${report.score}/100?`,
   ]
+  const explanation = report.scoreExplanation ?? explainScore(report.categories, report.score)
+  if (explanation.deductions.length === 0 && !explanation.cap) {
+    lines.push('- 🎉 Nada que descontar: score perfecto')
+  } else {
+    for (const d of explanation.deductions) {
+      lines.push(
+        `- **−${d.cost} pts** · ${d.count} hallazgo${d.count !== 1 ? 's' : ''} de ${CATEGORY_META[d.category].label.toLowerCase()} (${SEVERITY_META[d.severity].label.toLowerCase()})`,
+      )
+    }
+    if (explanation.cap) lines.push(`- ⬆️ ${explanation.cap.reason}`)
+  }
+  lines.push(
+    '',
+    `## 🧪 Chequeos estructurales`,
+  )
   for (const c of report.structural) {
     const icon = c.status === 'pass' ? '✅' : c.status === 'warn' ? '⚠️' : '❌'
     lines.push(`- ${icon} **${c.label}:** ${c.detail}`)
@@ -149,6 +165,10 @@ export function RepoReportView({
   )
 
   const verdict = VERDICT_META[report.verdict]
+  const explanation = useMemo(
+    () => report.scoreExplanation ?? explainScore(report.categories, report.score),
+    [report],
+  )
 
   const findingsByFile = useMemo(() => {
     const map = new Map<string, RepoFinding[]>()
@@ -279,6 +299,52 @@ export function RepoReportView({
                 </div>
               </div>
             </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* ── ¿Por qué este score? ────────────────────────────── */}
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, delay: 0.05 }}>
+        <Card className="bg-zinc-900/60">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              🧮 ¿Por qué {report.score}/100?
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Cada hallazgo resta según su severidad y el peso de su categoría: seguridad 30%,
+              alucinaciones 30%, bugs 25%, sobre-ingeniería 15%.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-1.5">
+            {explanation.deductions.length === 0 && !explanation.cap ? (
+              <p className="text-sm font-medium text-emerald-400">
+                🎉 Nada que descontar: no se encontró ningún hallazgo.
+              </p>
+            ) : (
+              <>
+                {explanation.deductions.map((d) => (
+                  <div key={d.key} className="flex items-center gap-2.5 text-sm">
+                    <span className={`size-2 shrink-0 rounded-full ${SEVERITY_META[d.severity]?.dot ?? 'bg-zinc-500'}`} aria-hidden />
+                    <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                      {d.count} hallazgo{d.count !== 1 ? 's' : ''} de{' '}
+                      {CATEGORY_META[d.category].label.toLowerCase()} ({SEVERITY_META[d.severity].label.toLowerCase()})
+                    </span>
+                    <span className="shrink-0 font-mono text-xs font-semibold text-red-400">
+                      −{d.cost} pts
+                    </span>
+                  </div>
+                ))}
+                {explanation.cap && (
+                  <div className="mt-2 flex items-center gap-2.5 rounded-lg border border-red-500/25 bg-red-500/5 p-2.5 text-sm">
+                    <span aria-hidden>⬆️</span>
+                    <span className="flex-1 text-muted-foreground">{explanation.cap.reason}</span>
+                    <span className="shrink-0 font-mono text-xs font-semibold text-red-400">
+                      −{explanation.rawWeighted - explanation.score} pts
+                    </span>
+                  </div>
+                )}
+              </>
+            )}
           </CardContent>
         </Card>
       </motion.div>

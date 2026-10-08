@@ -109,11 +109,15 @@ describe('CLI (E2E sobre el fixture vibe-coded)', () => {
       score: number
       verdict: string
       checks: { missingDeps: string[]; orphanFiles: string[] }
+      scoreExplanation?: { deductions: { cost: number; count: number }[]; cap: unknown }
     }
     expect(report.verdict).toBe('PELIGRO')
     expect(report.score).toBeLessThanOrEqual(35)
     expect(report.checks.missingDeps).toContain('left-pad-x')
     expect(report.checks.orphanFiles).toContain('src/billing/pagos.ts')
+    // score explicable: el JSON trae la atribución de puntos
+    expect(report.scoreExplanation?.deductions.length).toBeGreaterThan(0)
+    expect(report.scoreExplanation?.cap).not.toBeNull()
   })
 
   it('exit code 1 con veredicto PELIGRO en salida legible', () => {
@@ -121,6 +125,9 @@ describe('CLI (E2E sobre el fixture vibe-coded)', () => {
     expect(status).toBe(1)
     expect(stdout).toContain('Vibe Score')
     expect(stdout).toContain('left-pad-x')
+    // score explicable también en modo humano
+    expect(stdout).toContain('¿Por qué')
+    expect(stdout).toContain('pts')
   })
 
   it('sin argumentos imprime uso y sale 1', () => {
