@@ -417,15 +417,17 @@ async function runAudit(
     ingest = ingestFolder(body)
   }
   const { files, repoName, branch, stars, treeCount, treePreview, allPaths, contentHash, truncated, diff, baseHash } = ingest
-  // v2: los reportes pre-alias (falsos positivos masivos con @/*) no se sirven desde caché
-  const cacheKey = `repo:v2:${repoName}@${contentHash}${diff && baseHash ? `~diff:${baseHash}` : ''}`
+  // Esquema de caché: BUMPEAR cuando cambie el motor/scoring — el hash del repo
+  // no cambia cuando cambia VibeCheck, y un reporte viejo no debe servirse nunca
+  const CACHE_SCHEMA = 'v3'
+  const cacheKey = `repo:${CACHE_SCHEMA}:${repoName}@${contentHash}${diff && baseHash ? `~diff:${baseHash}` : ''}`
   const changed = diff ? changedPaths(diff) : null
 
   // ── 2. Caché por contenido: mismo repo sin cambios → sin LLM ──
   try {
     const hit = await db.vibeCache.findUnique({ where: { key: cacheKey } })
     if (hit) {
-      emit({ type: 'progress', phase: 'cache', pct: 80, message: 'Auditoría idéntica ya calculada — sirviendo desde caché' })
+      emit({ type: 'progress', phase: 'cache', pct: 80, message: '📦 Reporte servido desde CACHÉ (auditoría idéntica ya calculada antes)' })
       const report = JSON.parse(hit.report) as RepoReport
       let id: string
       try {
