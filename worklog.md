@@ -188,3 +188,21 @@ Work Log:
 
 Stage Summary:
 - La IA ya no puede fallar en silencio: fallo de lote es visible en vivo (progreso NDJSON o stderr), filesAudited mide lotes exitosos y el badge solo dice "con IA" si la IA aportó algo.
+
+---
+Task ID: 12
+Agent: ZCode (GLM)
+Task: Los 4 falsos positivos del reporte de dev_deck (29/100) — workspaces pnpm, secretos de demo, aliases anidados y .env.example. Verificación del usuario contra el código real.
+
+Work Log:
+- Baseline reproducido con el CLI real: 35/100 PELIGRO, 42 deps fantasma (incluido "@/lib"), 13 secretos (AWS demo en crítico), .env.example marcados, PluginGallery huérfano.
+- Workspaces (repo-scan): unión de dependencies/dev/peer/optional de TODOS los package.json del árbol + registro de nombres de paquetes internos (manifest.workspaceNames) — los imports de @devdeck/* ya no son fantasmas y el auto-import de paquetes internos tampoco.
+- Aliases anidados: se pliegan los paths de TODOS los tsconfig/jsconfig (raíz y subpaquetes), resueltos relativos al directorio de cada config; resolveAliasTarget prueba todos los candidatos y gana el primero que resuelve (mismo prefijo en dos paquetes con destinos distintos no se confunde). Un import resuelto por alias TAMBIÉN cuenta como uso del paquete (workspace:* vía paths) — sin esto @devdeck/* aparecía "sin uso".
+- Secretos: allowlist de credenciales canónicas de docs (AKIAIOSFODNN7EXAMPLE, secret key de AWS, ghp_ de docs de GitHub); contexto ±5 líneas con fake/ejemplo/demo → degrada a low; path de test/fixture/spec → degrada a low (nota en la explicación). El fixture propio usaba la key canónica de AWS como plantado: actualizada a una key realista.
+- .env.example/.sample/.template/.defaults no se marcan como commiteados (hechos para commitearse); los .env reales siguen.
+- Blob de menciones de deps sin uso ya no incluye package.json (nombran todas sus deps).
+- dev_deck después: 63/100 CASI LISTO — 0 fantasmas, 2 "sin uso" plausibles (modern-web-guidance, highlight.js), 1 huérfano REAL (PluginGallery.tsx: solo lo menciona un comentario que dice que fue reemplazado por IntegrationsList), 3 .env reales commiteados (backend, apps/web, apps/desktop — hallazgo genuino de higiene).
+- Tests: +6 (workspace deps, alias anidado bidireccional, alias anidado roto, .env de ejemplo, key canónica, degradación fake/test). 142 tests, tsc/eslint/build limpios.
+
+Stage Summary:
+- VibeCheck entiende monorepos: manifiesto = unión del árbol, aliases por paquete con resolución relativa, y paquetes internos usados vía paths cuentan como usados. Los secretos de demo (canónicos o declarados fake) ya no clavan el score en crítico. El reporte de dev_deck pasó de "PELIGRO por errores de la herramienta" a "CASI LISTO con hallazgos reales": 3 .env commiteados, PluginGallery muerto y 2 deps sin uso por verificar.

@@ -380,6 +380,76 @@ describe('scanRepo · dependencias sin uso (incluye scope @org/pkg)', () => {
   })
 })
 
+describe('scanRepo · monorepos (workspaces) y configs anidadas', () => {
+  it('deps declaradas en el package.json de subpaquetes no son fantasmas', () => {
+    const res = scanRepo([
+      { path: 'package.json', content: JSON.stringify({ name: 'mono', private: true, devDependencies: { typescript: '5' } }) },
+      { path: 'pnpm-workspace.yaml', content: 'packages:\n  - apps/*\n  - packages/*\n' },
+      { path: 'apps/web/package.json', content: JSON.stringify({ name: '@mono/web', dependencies: { react: '19', '@mono/ui': 'workspace:*' } }) },
+      { path: 'apps/web/src/main.tsx', content: `import { useState } from 'react'\nimport { Btn } from '@mono/ui'\nexport const App = () => [useState, Btn]\n` },
+      { path: 'packages/ui/package.json', content: JSON.stringify({ name: '@mono/ui', dependencies: { clsx: '^2' } }) },
+    ])
+    expect(res.checks.missingDeps).toEqual([])
+  })
+
+  it('aliases de tsconfig ANIDADOS resuelven relativos a su propio directorio', () => {
+    const res = scanRepo([
+      { path: 'package.json', content: JSON.stringify({ name: 'mono', dependencies: {} }) },
+      { path: 'apps/web/tsconfig.json', content: JSON.stringify({ compilerOptions: { paths: { '@/*': ['./src/*'] } } }) },
+      { path: 'apps/web/src/main.tsx', content: `import { hola } from '@/lib/saludo'\nexport const x = hola\n` },
+      { path: 'apps/web/src/lib/saludo.ts', content: 'export const hola = 1\n' },
+      // la MISMA ruta relativa en otro paquete con OTRO destino no se confunde
+      { path: 'apps/admin/tsconfig.json', content: JSON.stringify({ compilerOptions: { paths: { '@/*': ['./app/*'] } } }) },
+      { path: 'apps/admin/app/page.tsx', content: `import { hola } from '@/lib/saludo'\nexport const y = hola\n` },
+      { path: 'apps/admin/app/lib/saludo.ts', content: 'export const hola = 2\n' },
+    ])
+    expect(res.findings.filter((f) => f.title.startsWith('Import fantasma'))).toEqual([])
+    expect(res.checks.orphanFiles).toEqual([])
+  })
+
+  it('un alias anidado que no resuelve sigue marcándose como fantasma', () => {
+    const res = scanRepo([
+      { path: 'package.json', content: JSON.stringify({ name: 'mono', dependencies: {} }) },
+      { path: 'apps/web/tsconfig.json', content: JSON.stringify({ compilerOptions: { paths: { '@/*': ['./src/*'] } } }) },
+      { path: 'apps/web/src/main.tsx', content: `import { x } from '@/missing'\nexport const y = x\n` },
+    ])
+    expect(res.findings.some((f) => f.title.startsWith('Import fantasma'))).toBe(true)
+  })
+})
+
+describe('scanRepo · secretos de ejemplo y .env de ejemplo', () => {
+  it('.env.example/.template no se marcan como commiteados; el .env real sí', () => {
+    const res = scanRepo([
+      { path: '.env', content: 'SECRET=x\n' },
+      { path: '.env.example', content: 'SECRET=\n' },
+      { path: 'deploy/.env.example', content: 'DB_PASS=valor_demo\n' },
+      { path: 'apps/web/.env.template', content: 'TOKEN=\n' },
+      { path: 'apps/web/.env', content: 'TOKEN=abc\n' },
+    ])
+    expect(res.checks.envFiles).toEqual(['.env', 'apps/web/.env'])
+  })
+
+  it('la key de ejemplo de la documentación de AWS no se reporta', () => {
+    const res = scanRepo([
+      {
+        path: 'src/DemoScanner.tsx',
+        content: `const demo = [\n  '# demo .env — every value here is fake',\n  'AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE',\n]\n`,
+      },
+    ])
+    expect(res.checks.secretCount).toBe(0)
+  })
+
+  it('un secreto declarado fake cerca se degrada a low; los de test/fixture también', () => {
+    const res = scanRepo([
+      { path: 'src/DemoValues.tsx', content: `const ejemplo = [\n  'GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz123456',\n]\n` },
+      { path: 'src/utils.test.ts', content: `const t = 'ghp_abcdefghijklmnopqrstuvwxyz123456'\n` },
+    ])
+    const secrets = res.findings.filter((f) => f.category === 'security')
+    expect(secrets).toHaveLength(2)
+    expect(secrets.every((f) => f.severity === 'low')).toBe(true)
+  })
+})
+
 describe('selectAuditFiles', () => {
   const manifest: RepoFile = {
     path: 'package.json',

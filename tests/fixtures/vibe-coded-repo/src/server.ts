@@ -2,7 +2,7 @@ import { cobrar } from './billing/checkout'
 import leftPad from 'left-pad-x'
 import { createHmac } from 'node:crypto'
 
-const AWS_ACCESS_KEY_ID = 'AKIAIOSFODNN7EXAMPLE'
+const AWS_ACCESS_KEY_ID = 'AKIA7XQ2MRTPLD9EOCKS'
 
 export function startServer(app: express.Express) {
   app.post('/checkout', (req, res) => {

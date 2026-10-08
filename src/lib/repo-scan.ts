@@ -58,10 +58,24 @@ const SECRET_PATTERNS: { re: RegExp; title: string; severity: Severity }[] = [
   { re: /(?<![A-Za-z-])(?:api[_-]?key|apikey|secret|password|passwd|token)["']?\s*[:=]\s*["'][A-Za-z0-9_\-./+]{16,}["']/i, title: 'Credencial hardcodeada', severity: 'high' },
 ]
 
+/** Credenciales de ejemplo de la documentación oficial: reportarlas es mentir */
+const EXAMPLE_CREDENTIALS = new Set([
+  'AKIAIOSFODNN7EXAMPLE', // AWS docs
+  'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY', // AWS docs (secret key)
+  'ghp_16C7e42F292c6912E7710c838347Ae178B4a', // GitHub docs
+])
+const RE_FAKE_CONTEXT = /\b(fake|falsa|falso|ejemplo|example|dummy|placeholder|demo|de prueba)\b/i
+const RE_TEST_PATH =
+  /(^|\/)(tests?|specs?|__tests__|fixtures?|mocks?|samples?|examples?|demos?)(\/|$)|\.(test|spec)\.[a-z]+$|(^|\/)test_[^/]*\.|^test_[^/]*\.|_test\.py$/i
+
+const ENV_EXAMPLE_BASENAMES = new Set(['.env.example', '.env.sample', '.env.template', '.env.defaults'])
+
 export interface ManifestInfo {
   name: string | null
   deps: Set<string>
   allDeps: Set<string>
+  /** nombres de los package.json del workspace (paquetes internos importables) */
+  workspaceNames: Set<string>
 }
 
 export interface ScanStats {
@@ -342,7 +356,7 @@ export function scanRepo(files: RepoFile[], opts: ScanOptions = {}): ScanResult 
     null
 
   // ── Manifiesto ──────────────────────────────────────────
-  const manifest: ManifestInfo = { name: null, deps: new Set(), allDeps: new Set() }
+  const manifest: ManifestInfo = { name: null, deps: new Set(), allDeps: new Set(), workspaceNames: new Set() }
   let hasManifest = false
   let manifestName: string | null = null
   if (manifestFile && manifestFile.path === 'package.json') {
@@ -367,15 +381,73 @@ export function scanRepo(files: RepoFile[], opts: ScanOptions = {}): ScanResult 
     } catch {
       findings.push(makeFinding('package.json', 'high', 'bugs', 'package.json inválido', [1], 'El package.json no se puede parsear: el proyecto no instalará ni construirá.', 'Valida el JSON del manifiesto (por ejemplo con `npm pkg get name`).'))
     }
+    // Workspaces (pnpm/yarn/npm): cada paquete declara sus propias deps. Solo
+    // mirar la raíz inventaría "fantasmas" que no existen — se une el árbol.
+    const workspaceNames = new Set<string>()
+    for (const f of files) {
+      if (!f.path.endsWith('package.json') || f.path === manifestFile.path) continue
+      try {
+        const pkg = JSON.parse(f.content) as {
+          name?: string
+          dependencies?: Record<string, string>
+          devDependencies?: Record<string, string>
+          peerDependencies?: Record<string, string>
+          optionalDependencies?: Record<string, string>
+        }
+        if (pkg.name) workspaceNames.add(pkg.name)
+        for (const d of Object.keys(pkg.dependencies ?? {})) manifest.deps.add(d)
+        for (const d of [
+          ...Object.keys(pkg.dependencies ?? {}),
+          ...Object.keys(pkg.devDependencies ?? {}),
+          ...Object.keys(pkg.peerDependencies ?? {}),
+          ...Object.keys(pkg.optionalDependencies ?? {}),
+        ]) {
+          manifest.allDeps.add(d)
+        }
+      } catch {
+        /* package.json de subpaquete ilegible: no bloquea el escaneo */
+      }
+    }
+    manifest.workspaceNames = workspaceNames
   } else if (manifestFile) {
     hasManifest = true
     manifestName = manifestFile.path
   }
 
   // ── Escaneo por archivo ──────────────────────────────────
-  const aliasFile =
-    files.find((f) => f.path === 'tsconfig.json') ?? files.find((f) => f.path === 'jsconfig.json')
-  const aliases = parseAliasConfig(aliasFile ?? undefined)
+  // Aliases de TODOS los tsconfig/jsconfig (raíz y anidados): en monorepos cada
+  // paquete define los suyos y sus rutas son relativas a su propio directorio.
+  const aliasPrefixes: AliasConfig['prefixes'] = []
+  for (const f of files) {
+    const base = f.path.split('/').pop() ?? ''
+    if (base !== 'tsconfig.json' && base !== 'jsconfig.json') continue
+    const cfg = parseAliasConfig(f)
+    if (cfg.prefixes.length === 0) continue
+    const dir = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : ''
+    const baseDir = cfg.baseUrl ? (dir ? `${dir}/${cfg.baseUrl}` : cfg.baseUrl) : dir
+    for (const p of cfg.prefixes) {
+      aliasPrefixes.push({
+        prefix: p.prefix,
+        target: baseDir ? `${baseDir}/${p.target}` : p.target,
+        wildcard: p.wildcard,
+      })
+    }
+  }
+  aliasPrefixes.sort((a, b) => b.prefix.length - a.prefix.length)
+  const aliases: AliasConfig = { baseUrl: '', prefixes: aliasPrefixes }
+  /** Prueba TODOS los aliases que matchean: gana el primero que resuelve */
+  const resolveAliasTarget = (mod: string): string | null => {
+    let fallback: string | null = null
+    for (const { prefix, target, wildcard } of aliases.prefixes) {
+      let mapped: string | null = null
+      if (mod === prefix) mapped = target
+      else if (wildcard && mod.startsWith(prefix)) mapped = target + mod.slice(prefix.length)
+      if (mapped === null) continue
+      if (resolves('', mapped, pathSet)) return mapped
+      if (fallback === null) fallback = mapped
+    }
+    return fallback
+  }
 
   const externalUsed = new Set<string>()
   const importedPkgs = new Set<string>()
@@ -419,38 +491,64 @@ export function scanRepo(files: RepoFile[], opts: ScanOptions = {}): ScanResult 
     if (lang) langCount.set(lang, (langCount.get(lang) ?? 0) + 1)
 
     const base = f.path.split('/').pop() ?? ''
-    if (base.startsWith('.env') || f.path.includes('/.env')) {
+    // .env.example/.sample/.template están hechos para commitearse: no son filtraciones
+    const envExample =
+      ENV_EXAMPLE_BASENAMES.has(base) ||
+      base.endsWith('.example') ||
+      base.endsWith('.sample') ||
+      base.endsWith('.template')
+    if (base.startsWith('.env') && !envExample) {
       envFiles.push(f.path)
     }
 
     // Secretos (máx 3 matches por archivo para no inundar)
     let fileSecrets = 0
+    const contentLines = hasContent ? f.content.split('\n') : []
     for (const { re, title, severity } of SECRET_PATTERNS) {
       const m = hasContent ? f.content.match(re) : null
-      if (m && fileSecrets < 3) {
-        fileSecrets++
-        secretCount++
-        findings.push(
-          makeFinding(
-            f.path,
-            severity,
-            'security',
-            title,
-            [lineOf(f.content, m[0])],
-            `Se detectó "${title}" dentro del repositorio. Si el repo es público, la credencial ya debe considerarse comprometida.`,
-            'Revoca la credencial inmediatamente, muévela a variables de entorno (.env excluido del repo) y limpia el historial de git si hace falta.',
-          ),
-        )
+      if (!m) continue
+      if (EXAMPLE_CREDENTIALS.has(m[0])) continue
+      if (fileSecrets >= 3) break
+      // valores de prueba declarados (contexto "fake/demo" cerca) o archivos de
+      // test/fixture: se degradan a low — no pueden clavar el score con un crítico
+      let sev = severity
+      let note = ''
+      const matchIdx = contentLines.findIndex((l) => l.includes(m[0]))
+      if (matchIdx !== -1) {
+        const ctx = contentLines.slice(Math.max(0, matchIdx - 5), matchIdx + 6).join('\n')
+        if (RE_FAKE_CONTEXT.test(ctx)) {
+          sev = 'low'
+          note = ' El propio archivo lo declara como ejemplo/fake.'
+        } else if (RE_TEST_PATH.test(f.path)) {
+          sev = 'low'
+          note = ' Está en un archivo de test/fixture: no se distingue de un valor de prueba.'
+        }
       }
+      fileSecrets++
+      secretCount++
+      findings.push(
+        makeFinding(
+          f.path,
+          sev,
+          'security',
+          title,
+          [matchIdx + 1],
+          `Se detectó "${title}" dentro del repositorio. Si el repo es público, la credencial ya debe considerarse comprometida.${note}`,
+          'Revoca la credencial inmediatamente, muévela a variables de entorno (.env excluido del repo) y limpia el historial de git si hace falta.',
+        ),
+      )
     }
 
     // Imports
     if (!hasContent) continue
     for (const mod of extractModules(f.path, f.content)) {
-      const aliasTarget = applyAlias(mod, aliases)
+      const aliasTarget = resolveAliasTarget(mod)
       if (aliasTarget !== null) {
-        // alias de tsconfig: resuelve desde la raíz del repo
         checkLocalImport(f, mod, aliasTarget, true)
+        // resuelto por alias también es "usar" el paquete (workspace:* vía paths):
+        // si no, la dep interna aparece como sin uso
+        const aliasPkg = pkgOf(mod)
+        if (aliasPkg) importedPkgs.add(aliasPkg)
       } else if (isRelative(mod)) {
         if (f.path.endsWith('.py')) continue
         checkLocalImport(f, mod, mod)
@@ -459,8 +557,9 @@ export function scanRepo(files: RepoFile[], opts: ScanOptions = {}): ScanResult 
         if (!pkg) continue
         externalUsed.add(pkg)
         importedPkgs.add(pkg)
-        // auto-import del propio paquete (patrón estándar para tests) no es fantasma
-        const isSelfRef = manifest.name !== null && pkg === manifest.name
+        // auto-import del propio paquete y de cualquier paquete del workspace no son fantasmas
+        const isSelfRef =
+          (manifest.name !== null && pkg === manifest.name) || manifest.workspaceNames.has(pkg)
         if (hasManifest && manifestName === 'package.json' && !isSelfRef && !manifest.allDeps.has(pkg)) {
           const arr = missingDepFiles.get(pkg) ?? []
           arr.push(f.path)
@@ -502,7 +601,8 @@ export function scanRepo(files: RepoFile[], opts: ScanOptions = {}): ScanResult 
     const mentionBlob = files
       .filter((f) => {
         if (f.content.length === 0 || f.content.length > 8192) return false
-        if (f.path === manifestName) return false
+        // los manifiestos nombran a todas sus deps: no prueban uso
+        if (f.path === 'package.json' || f.path.endsWith('/package.json')) return false
         const base = f.path.split('/').pop() ?? ''
         return MENTION_EXT.test(f.path) || base.startsWith('.')
       })
