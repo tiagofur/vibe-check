@@ -10,6 +10,7 @@ import { createGunzip } from 'node:zlib'
 import { Readable } from 'node:stream'
 import type { RepoFile } from './repo-types'
 import { isScannablePath, riskScore } from './repo-scan'
+import { isStructuralFile } from './folder-pick'
 
 export const MAX_DECOMPRESSED_BYTES = 1.5 * 1024 * 1024 * 1024
 
@@ -221,6 +222,8 @@ export interface TreeReadResult {
   treeCount: number
   /** Rutas del top-N retenido, en orden de riesgo */
   treePreview: string[]
+  /** Rutas de TODO el árbol escaneable (para resolver imports fuera de la muestra) */
+  allPaths: string[]
   /** true si hubo entradas elegibles descartadas por el cap */
   truncated: boolean
   decompressedBytes: number
@@ -234,9 +237,14 @@ export function stripTarRoot(path: string): string | null {
   return clean.slice(slash + 1)
 }
 
+/** Techo defensivo del registro de rutas: árboles absurdos degradan a muestra */
+const MAX_ALL_PATHS = 50_000
+
 /** Reserva contenido del top-N por riskScore; descarta sin leer lo que no cabe */
 export class TopRiskKeeper {
   private kept: { path: string; risk: number; content: string }[] = []
+  /** manifiestos y tsconfig: el grafo los exige, nunca se evictan */
+  private structural = new Map<string, string>()
   evictions = 0
 
   constructor(
@@ -253,6 +261,10 @@ export class TopRiskKeeper {
   }
 
   async consider(path: string, read: (maxBytes: number) => Promise<string>): Promise<void> {
+    if (isStructuralFile(path)) {
+      if (!this.structural.has(path)) this.structural.set(path, await read(this.maxBytesPerFile))
+      return
+    }
     const risk = riskScore(path)
     if (this.kept.length >= this.max && risk <= this.lowestRisk) {
       this.evictions++
@@ -274,11 +286,12 @@ export class TopRiskKeeper {
   }
 
   get files(): RepoFile[] {
-    return this.kept.map((k) => ({ path: k.path, content: k.content }))
+    const structuralFiles = [...this.structural].map(([path, content]) => ({ path, content }))
+    return [...structuralFiles, ...this.kept.map((k) => ({ path: k.path, content: k.content }))]
   }
 
   get paths(): string[] {
-    return this.kept.map((k) => k.path)
+    return [...this.structural.keys(), ...this.kept.map((k) => k.path)]
   }
 }
 
@@ -292,6 +305,7 @@ export async function readTarTree(
 ): Promise<TreeReadResult> {
   const keeper = new TopRiskKeeper(opts.maxFiles, opts.maxBytesPerFile ?? 64 * 1024)
   let treeCount = 0
+  const allPaths: string[] = []
 
   const entries = iterTarEntries(gunzipStream(stream), {
     maxDecompressedBytes: opts.maxDecompressedBytes,
@@ -301,6 +315,7 @@ export async function readTarTree(
     if (!rel || rel.includes('..')) continue
     if (!isScannablePath(rel, entry.size)) continue
     treeCount++
+    if (allPaths.length < MAX_ALL_PATHS) allPaths.push(rel)
     await keeper.consider(rel, entry.read)
   }
 
@@ -308,6 +323,7 @@ export async function readTarTree(
     files: keeper.files,
     treeCount,
     treePreview: keeper.paths,
+    allPaths,
     truncated: keeper.truncated,
     decompressedBytes: 0,
   }

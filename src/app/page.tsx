@@ -19,7 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { SAMPLES, type Sample } from '@/lib/samples'
-import { FOLDER_CAPS, HEAVY_DIR_NAMES, omittedSummary, pickDecision, type OmitReason } from '@/lib/folder-pick'
+import { FOLDER_CAPS, HEAVY_DIR_NAMES, isStructuralFile, omittedSummary, pickDecision, type OmitReason } from '@/lib/folder-pick'
 import {
   LANGUAGES,
   MAX_CODE_LENGTH,
@@ -151,12 +151,15 @@ async function readFolder(fileList: File[]): Promise<FolderPickResult> {
       omitted[decision] = (omitted[decision] ?? 0) + 1
       continue
     }
-    if (files.length >= FOLDER_CAPS.maxFiles) {
-      omitted['overflow-files'] = (omitted['overflow-files'] ?? 0) + 1
-      continue
+    // package.json / tsconfig viajan siempre: sin ellos el grafo inventa fantasmas
+    if (!isStructuralFile(rel)) {
+      if (files.length >= FOLDER_CAPS.maxFiles) {
+        omitted['overflow-files'] = (omitted['overflow-files'] ?? 0) + 1
+        continue
+      }
     }
     const text = await file.text()
-    if (total + text.length > FOLDER_CAPS.maxTotalBytes) {
+    if (!isStructuralFile(rel) && total + text.length > FOLDER_CAPS.maxTotalBytes) {
       omitted['overflow-bytes'] = (omitted['overflow-bytes'] ?? 0) + 1
       continue
     }

@@ -267,6 +267,117 @@ describe('scanRepo · aliases de tsconfig/jsconfig', () => {
     expect(res.findings.filter((f) => f.title.startsWith('Import fantasma'))).toEqual([])
     expect(res.checks.missingDeps).toEqual([])
   })
+
+  it('un alias sin * no captura imports que solo comparten prefijo', () => {
+    const res = scanRepo([
+      pkg,
+      { path: 'tsconfig.json', content: JSON.stringify({ compilerOptions: { paths: { '@lib': ['./src/lib'] } } }) },
+      { path: 'a.ts', content: `import { x } from '@libfoo'\nexport const y = x\n` },
+    ])
+    // '@libfoo' no lo captura '@lib': queda como paquete externo, no como ruta local fantasma
+    expect(res.findings.some((f) => f.title.startsWith('Import fantasma'))).toBe(false)
+    expect(res.checks.missingDeps).toContain('@libfoo')
+  })
+})
+
+describe('scanRepo · árbol parcial (top-N por riesgo) y archivos solo-ruta', () => {
+  const pkg = { path: 'package.json', content: JSON.stringify({ name: 'x', dependencies: {} }) }
+  const tsconfig = {
+    path: 'tsconfig.json',
+    content: JSON.stringify({ compilerOptions: { paths: { '@/*': ['./src/*'] } } }),
+  }
+  const page = {
+    path: 'app/page.tsx',
+    content: `import { hola } from '@/lib/saludo'\nexport default () => hola\n`,
+  }
+
+  it('con allPaths, un import hacia un archivo fuera de la muestra NO es fantasma', () => {
+    // el caso real: top-N por riesgo leyó page.tsx pero no saludo.ts (que existe)
+    const res = scanRepo([pkg, tsconfig, page], {
+      allPaths: ['app/page.tsx', 'src/lib/saludo.ts', 'package.json', 'tsconfig.json'],
+    })
+    expect(res.findings.filter((f) => f.title.startsWith('Import fantasma'))).toEqual([])
+    expect(res.checks.missingDeps).toEqual([])
+  })
+
+  it('sin allPaths el archivo ausente sí se marca como fantasma', () => {
+    const res = scanRepo([pkg, tsconfig, page])
+    expect(res.findings.some((f) => f.title.startsWith('Import fantasma'))).toBe(true)
+  })
+
+  it('partialTree suprime deps sin uso y huérfanos: la muestra no alcanza para afirmarlo', () => {
+    const pkgDead = {
+      path: 'package.json',
+      content: JSON.stringify({ name: 'x', dependencies: { leftpad: '1' } }),
+    }
+    const res = scanRepo(
+      [pkgDead, tsconfig, page, { path: 'src/solo.ts', content: 'export const s = 1\n' }],
+      { partialTree: true },
+    )
+    expect(res.findings.some((f) => f.title.includes('sin uso'))).toBe(false)
+    expect(res.findings.some((f) => f.title.includes('huérfano'))).toBe(false)
+    // los checks conservan lo observado en la muestra (el panel lo informa como conteo)
+    expect(res.checks.unusedDeps).toContain('leftpad')
+    expect(res.checks.orphanFiles).toContain('src/solo.ts')
+  })
+
+  it('un archivo solo-ruta (sin contenido) no compite como huérfano ni rompe stats', () => {
+    const res = scanRepo(
+      [pkg, { path: 'src/leido.ts', content: 'export const l = 1\n' }, { path: 'src/solo-ruta.ts', content: '' }],
+      {},
+    )
+    expect(res.checks.orphanFiles).toEqual(['src/leido.ts'])
+    expect(res.stats.totalLines).toBe(3) // pkg (1) + leido.ts (2 con su \n final); solo-ruta no suma
+  })
+})
+
+describe('scanRepo · patrones de credenciales sin falsos positivos', () => {
+  it('autoComplete de formularios (new-password / current-password) no es credencial', () => {
+    const res = scanRepo([
+      {
+        path: 'src/app/login/page.tsx',
+        content: `<Input autoComplete={needsBootstrap ? 'new-password' : 'current-password'} />\n`,
+      },
+    ])
+    expect(res.findings.filter((f) => f.category === 'security')).toEqual([])
+    expect(res.checks.secretCount).toBe(0)
+  })
+
+  it('una password hardcodeada real sigue detectándose', () => {
+    const res = scanRepo([
+      { path: 'src/config.ts', content: `const password = "supersecreto123456"\n` },
+      { path: 'src/otro.ts', content: `MY_SECRET='abcdefgh1234567890'\n` },
+    ])
+    expect(res.checks.secretCount).toBe(2)
+  })
+})
+
+describe('scanRepo · dependencias sin uso (incluye scope @org/pkg)', () => {
+  it('una dependencia con scope declarada y nunca importada se marca', () => {
+    const res = scanRepo([
+      {
+        path: 'package.json',
+        content: JSON.stringify({ name: 'x', dependencies: { '@dnd-kit/core': '^6', clsx: '^2' } }),
+      },
+      { path: 'src/a.ts', content: `import { clsx } from 'clsx'\nexport const a = clsx\n` },
+    ])
+    const unused = res.findings.find((f) => f.title.includes('sin uso'))
+    expect(unused?.explanation).toContain('@dnd-kit/core')
+    expect(unused?.explanation).not.toContain('clsx')
+  })
+
+  it('una dependencia mencionada por nombre en un config no se marca (carga por string)', () => {
+    const res = scanRepo([
+      {
+        path: 'package.json',
+        content: JSON.stringify({ name: 'x', dependencies: { 'algun-plugin': '1' } }),
+      },
+      { path: 'vite.config.ts', content: `export default { plugins: ['algun-plugin'] }\n` },
+    ])
+    expect(res.findings.some((f) => f.title.includes('sin uso'))).toBe(false)
+    // el check la observa, pero el hallazgo no la afirma
+    expect(res.checks.unusedDeps).toContain('algun-plugin')
+  })
 })
 
 describe('selectAuditFiles', () => {

@@ -52,7 +52,7 @@ export function buildDeterministicNarrative(input: DeterministicInput): Determin
     `${VERDICT_META[input.verdict].message}`
 
   const architecture =
-    `Grafo de imports de ${input.stats.filesAudited} archivos leídos contra ${manifestLabel}. ` +
+    `Grafo de imports de ${input.stats.filesScanned} archivos escaneados contra ${manifestLabel}. ` +
     `Lenguajes: ${input.stats.languages.slice(0, 4).join(', ') || 'n/d'}. Motor 100% reproducible, cero LLM — ` +
     `cada hallazgo marcado "verificado" sale del escaneo determinista, no de una opinión de modelo.`
 

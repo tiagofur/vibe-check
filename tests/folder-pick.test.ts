@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   FOLDER_CAPS,
   inHeavyPath,
+  isStructuralFile,
   omittedSummary,
   pickDecision,
 } from '../src/lib/folder-pick'
@@ -40,5 +41,19 @@ describe('omittedSummary', () => {
     expect(
       omittedSummary({ 'too-big': 2, 'overflow-files': 3, 'overflow-bytes': 1 }),
     ).toBe('2 no elegibles · 3 por tope de archivos · 1 por tope de tamaño')
+  })
+})
+
+describe('isStructuralFile', () => {
+  it('reconoce manifiesto y configs de alias solo en la raíz', () => {
+    expect(isStructuralFile('package.json')).toBe(true)
+    expect(isStructuralFile('tsconfig.json')).toBe(true)
+    expect(isStructuralFile('jsconfig.json')).toBe(true)
+    expect(isStructuralFile('go.mod')).toBe(true)
+    expect(isStructuralFile('requirements.txt')).toBe(true)
+    expect(isStructuralFile('Cargo.toml')).toBe(true)
+    expect(isStructuralFile('packages/app/package.json')).toBe(false)
+    expect(isStructuralFile('src/tsconfig.json')).toBe(false)
+    expect(isStructuralFile('tsconfig.app.json')).toBe(false)
   })
 })

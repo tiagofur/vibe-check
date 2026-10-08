@@ -98,6 +98,23 @@ describe('TopRiskKeeper', () => {
     expect(keeper.paths).toHaveLength(2)
     expect(keeper.truncated).toBe(true)
   })
+
+  it('los archivos estructurales (package.json, tsconfig.json) nunca se evictan', async () => {
+    const keeper = new TopRiskKeeper(2, 1024)
+    const fakeRead = (content: string) => async () => content
+    await keeper.consider('src/auth/a.ts', fakeRead('a'))
+    await keeper.consider('src/api/b.ts', fakeRead('b'))
+    await keeper.consider('src/api/c.ts', fakeRead('c')) // llena el cupo de riesgo alto
+    await keeper.consider('tsconfig.json', fakeRead('{"compilerOptions":{"paths":{"@/*":["./src/*"]}}}'))
+    await keeper.consider('package.json', fakeRead('{"name":"x"}'))
+    await keeper.consider('nested/package.json', fakeRead('{"name":"nested"}')) // solo la raíz es estructural
+    expect(keeper.paths).toContain('tsconfig.json')
+    expect(keeper.paths).toContain('package.json')
+    expect(keeper.paths).not.toContain('nested/package.json')
+    expect(keeper.files.find((f) => f.path === 'tsconfig.json')?.content).toContain('compilerOptions')
+    // los estructurales no consumen cupo del top-N
+    expect(keeper.paths.filter((p) => p.startsWith('src/'))).toHaveLength(2)
+  })
 })
 
 describe('readTarTree', () => {
@@ -124,6 +141,20 @@ describe('readTarTree', () => {
     expect(tree.treeCount).toBe(1)
     expect(tree.truncated).toBe(false)
     expect(tree.files).toHaveLength(1)
+  })
+
+  it('allPaths registra el árbol escaneable completo, incluido lo evictado por el cap', async () => {
+    const tar = buildTarBuffer([
+      { path: `${ROOT}/docs/a.md`, content: 'md\n' },
+      { path: `${ROOT}/docs/b.md`, content: 'md\n' },
+      { path: `${ROOT}/src/lib/saludo.ts`, content: 'export const hola = 1\n' },
+      { path: `${ROOT}/tsconfig.json`, content: '{"compilerOptions":{}}' },
+    ])
+    const tree = await readTarTree(asGzStream(tar), { maxFiles: 1 })
+    expect(tree.allPaths).toEqual(['docs/a.md', 'docs/b.md', 'src/lib/saludo.ts', 'tsconfig.json'])
+    // tsconfig viaja con contenido aunque el cap sea 1
+    expect(tree.files.map((f) => f.path)).toEqual(['tsconfig.json', expect.any(String)])
+    expect(tree.allPaths.length).toBe(tree.treeCount)
   })
 
   it('aplica el techo de descompresión con mensaje que refleja el cap', async () => {

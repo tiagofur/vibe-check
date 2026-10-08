@@ -28,6 +28,25 @@ export const HEAVY_DIR_NAMES = new Set([
 export const RE_HEAVY_PATH =
   /(^|\/)(node_modules|\.git|dist|build|out|coverage|\.next|vendor|__pycache__|\.venv|venv|target|bin|obj|\.turbo|\.cache)(\/|$)/
 
+/**
+ * Manifiestos y configs de alias que el grafo de imports necesita SÍ o SÍ:
+ * sin package.json no hay deps fantasma y sin tsconfig/jsconfig los imports
+ * "@/*" se vuelven falsos positivos masivos. Nunca se recortan por topes.
+ */
+export const STRUCTURAL_FILES = new Set([
+  'package.json',
+  'tsconfig.json',
+  'jsconfig.json',
+  'go.mod',
+  'requirements.txt',
+  'Cargo.toml',
+])
+
+/** ¿Es un archivo estructural (raíz del repo) que el motor exige tener? */
+export function isStructuralFile(path: string): boolean {
+  return STRUCTURAL_FILES.has(path)
+}
+
 const BINARY_EXT = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'ico', 'webp', 'bmp', 'mp4', 'mp3', 'wav', 'mov',
   'woff', 'woff2', 'ttf', 'eot', 'otf', 'zip', 'tar', 'gz', 'tgz', 'rar', '7z',

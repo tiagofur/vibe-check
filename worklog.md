@@ -113,3 +113,22 @@ Work Log:
 
 Stage Summary:
 - Del reporte a la corrección: el usuario puede descargar el fix pack completo (checklist + prompts por severidad) o copiar el prompt de un hallazgo puntual desde el acordeón, pegarlo en Cursor/Claude/Copilot, corregir, y re-auditar. Cierra el ciclo del producto: auditar → entender → corregir → re-auditar.
+
+---
+Task ID: 7
+Agent: ZCode (GLM)
+Task: Eliminar los falsos positivos masivos del motor determinista (reporte real: 64 "imports fantasma" y 55/100 en un proyecto sano con alias @/*).
+
+Work Log:
+- Causa raíz: el grafo solo ve el top-N por riesgo. En GitHub (120 archivos) y en carpetas (>600), tsconfig.json/package.json quedaban fuera → parseAliasConfig(undefined) → cada import "@/…" era "fantasma"; y con muestra parcial, archivos cuyo importador fue descartado aparecían como "huérfanos" y deps usadas como "sin uso".
+- folder-pick.ts: STRUCTURAL_FILES + isStructuralFile() — manifiesto y tsconfig/jsconfig/go.mod/requirements/Cargo nunca se recortan.
+- tar-gz.ts: TopRiskKeeper retiene los estructurales aparte (no consumen cupo) y readTarTree devuelve allPaths (árbol escaneable completo, cap 50k) para resolver imports fuera de la muestra.
+- repo-scan.ts: scanRepo(files, { allPaths?, partialTree? }) — archivos solo-ruta (content: '') nutren el grafo sin sumar líneas/secretos/hallazgos; partialTree suprime los hallazgos que exigen grafo completo (deps sin uso, huérfanos; los checks los conservan como conteo observado); alias sin '*' ya no captura por prefijo (@lib no atrapa @libfoo); deps sin uso ahora incluye paquetes con scope (@dnd-kit/*) pero con guarda de "mención por string" en configs/dotfiles pequeños (los md/txt no cuentan: documentar no es usar).
+- Regex de credenciales: lookbehind (?<![A-Za-z-]) — autoComplete='new-password' : 'current-password' ya no es "Credencial hardcodeada"; las claves reales (password=, MY_SECRET=) siguen detectándose.
+- analyze-repo/route.ts: ingesta de carpeta garantiza estructurales y conserva excedentes como solo-ruta; auditPool filtra solo-ruta antes del LLM; panel estructural anota "(muestra parcial del árbol)" en deps sin uso/huérfanos; caché bumpada a repo:v2 (los reportes pre-alias no se sirven).
+- page.tsx (cliente): readFolder deja pasar package.json/tsconfig aunque se llegue a los topes de archivos/bytes.
+- deterministic-report.ts: la arquitectura decía "Grafo de imports de 0 archivos leídos" (confundía filesAudited=IA con el grafo); ahora "N archivos escaneados".
+- Tests: +13 (allPaths resuelve fuera de muestra, partialTree suprime, solo-ruta, autoComplete, password real, scope sin uso, mención en config, alias estricto, keeper estructural, allPaths del tar, isStructuralFile, narrativa honesta). 114 en verde, tsc/eslint/build limpios.
+
+Stage Summary:
+- Un proyecto Next.js sano con @/* ya no recibe −288 puntos inventados: el grafo garantiza manifiesto+tsconfig, resuelve contra el árbol completo y se niega a afirmar lo que la muestra no alcanza a probar. La credibilidad del auditor (cero falsos positivos de resolvedor) era el bug #1 del producto.

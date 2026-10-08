@@ -53,7 +53,9 @@ const SECRET_PATTERNS: { re: RegExp; title: string; severity: Severity }[] = [
   { re: /gh[pousr]_[A-Za-z0-9]{20,}/, title: 'Token de GitHub', severity: 'high' },
   { re: /xox[baprs]-[A-Za-z0-9-]{10,}/, title: 'Token de Slack', severity: 'high' },
   { re: /(?:postgres(?:ql)?|mysql|redis|mongodb(?:\+srv)?):\/\/[^/\s:'"]+:[^@/\s"']{4,}@/, title: 'URL de base de datos con contraseña', severity: 'high' },
-  { re: /(?:api[_-]?key|apikey|secret|password|passwd|token)["']?\s*[:=]\s*["'][A-Za-z0-9_\-./+]{16,}["']/i, title: 'Credencial hardcodeada', severity: 'high' },
+  // El lookbehind evita matchear claves dentro de palabras compuestas del HTML,
+  // ej. autoComplete='new-password' : 'current-password' (falso positivo clásico)
+  { re: /(?<![A-Za-z-])(?:api[_-]?key|apikey|secret|password|passwd|token)["']?\s*[:=]\s*["'][A-Za-z0-9_\-./+]{16,}["']/i, title: 'Credencial hardcodeada', severity: 'high' },
 ]
 
 export interface ManifestInfo {
@@ -173,7 +175,7 @@ export interface AliasConfig {
   /** baseUrl de tsconfig ('' = raíz del repo) */
   baseUrl: string
   /** prefijos sin el '*' final, ordenados por especificidad */
-  prefixes: { prefix: string; target: string }[]
+  prefixes: { prefix: string; target: string; wildcard: boolean }[]
 }
 
 const EMPTY_ALIASES: AliasConfig = { baseUrl: '', prefixes: [] }
@@ -241,6 +243,7 @@ export function parseAliasConfig(file: RepoFile | undefined): AliasConfig {
       (targets ?? []).map((t) => ({
         prefix: key.endsWith('*') ? key.slice(0, -1) : key,
         target: (t ?? '').replace(/\*$/, '').replace(/^\.\//, ''),
+        wildcard: key.endsWith('*'),
       })),
     )
     prefixes.sort((a, b) => b.prefix.length - a.prefix.length)
@@ -255,8 +258,9 @@ export function applyAlias(mod: string, aliases: AliasConfig): string | null {
   for (const { prefix, target } of aliases.prefixes) {
     if (mod === prefix) return aliases.baseUrl ? `${aliases.baseUrl}/${target}` : target
   }
-  for (const { prefix, target } of aliases.prefixes) {
-    if (mod.startsWith(prefix)) {
+  // el match por prefijo solo aplica a patrones con '*': "@lib" no debe capturar "@libfoo"
+  for (const { prefix, target, wildcard } of aliases.prefixes) {
+    if (wildcard && mod.startsWith(prefix)) {
       const mapped = target + mod.slice(prefix.length)
       return aliases.baseUrl ? `${aliases.baseUrl}/${mapped}` : mapped
     }
@@ -317,9 +321,18 @@ function makeFinding(
   return { file, severity, category, title, lines, explanation, fix, origin: 'scan' }
 }
 
-export function scanRepo(files: RepoFile[]): ScanResult {
+export interface ScanOptions {
+  /** Rutas escaneables del árbol completo aunque su contenido no se haya
+   *  leído (top-N por riesgo): permite resolver imports fuera de la muestra */
+  allPaths?: string[]
+  /** El contenido es una muestra del árbol: los hallazgos que exigen el
+   *  grafo completo (deps sin uso, huérfanos) se suprimen para no inventar */
+  partialTree?: boolean
+}
+
+export function scanRepo(files: RepoFile[], opts: ScanOptions = {}): ScanResult {
   const findings: RepoFinding[] = []
-  const pathSet = new Set(files.map((f) => f.path))
+  const pathSet = new Set([...(opts.allPaths ?? []), ...files.map((f) => f.path)])
   const pathLower = new Map(files.map((f) => [f.path.toLowerCase(), f.path]))
   const manifestFile =
     files.find((f) => f.path === 'package.json') ??
@@ -400,7 +413,8 @@ export function scanRepo(files: RepoFile[]): ScanResult {
   }
 
   for (const f of files) {
-    totalLines += f.content.split('\n').length
+    const hasContent = f.content.length > 0
+    if (hasContent) totalLines += f.content.split('\n').length
     const lang = langLabel(f.path)
     if (lang) langCount.set(lang, (langCount.get(lang) ?? 0) + 1)
 
@@ -412,7 +426,7 @@ export function scanRepo(files: RepoFile[]): ScanResult {
     // Secretos (máx 3 matches por archivo para no inundar)
     let fileSecrets = 0
     for (const { re, title, severity } of SECRET_PATTERNS) {
-      const m = f.content.match(re)
+      const m = hasContent ? f.content.match(re) : null
       if (m && fileSecrets < 3) {
         fileSecrets++
         secretCount++
@@ -431,6 +445,7 @@ export function scanRepo(files: RepoFile[]): ScanResult {
     }
 
     // Imports
+    if (!hasContent) continue
     for (const mod of extractModules(f.path, f.content)) {
       const aliasTarget = applyAlias(mod, aliases)
       if (aliasTarget !== null) {
@@ -473,29 +488,47 @@ export function scanRepo(files: RepoFile[]): ScanResult {
     )
   }
 
-  // Dependencias muertas (declaradas y nunca importadas)
-  if (hasManifest && manifestName === 'package.json') {
-    const unused = [...manifest.deps].filter(
-      (d) => !importedPkgs.has(d) && !d.startsWith('@types/') && !d.startsWith('@'),
-    )
-    if (unused.length > 0) {
+  // Dependencias muertas (declaradas y nunca importadas). En árbol parcial
+  // no se afirma nada: archivos clave pueden estar fuera de la muestra.
+  const unusedDeps =
+    hasManifest && manifestName === 'package.json'
+      ? [...manifest.deps].filter((d) => !importedPkgs.has(d) && !d.startsWith('@types/'))
+      : []
+  if (unusedDeps.length > 0 && !opts.partialTree) {
+    // "mencionada" = su nombre aparece en un config/código pequeño (plugins
+    // que se cargan por string, dotfiles): los configs no importan, pero usan.
+    // La documentación (md/txt) no cuenta: describir una deps no es usarla.
+    const MENTION_EXT = /\.(json|mjs|cjs|ts|tsx|jsx|mts|cts|ya?ml|toml|ini|conf)$/
+    const mentionBlob = files
+      .filter((f) => {
+        if (f.content.length === 0 || f.content.length > 8192) return false
+        if (f.path === manifestName) return false
+        const base = f.path.split('/').pop() ?? ''
+        return MENTION_EXT.test(f.path) || base.startsWith('.')
+      })
+      .map((f) => f.content)
+      .join('\u0000')
+    const dead = unusedDeps.filter((d) => !mentionBlob.includes(d))
+    if (dead.length > 0) {
       findings.push(
         makeFinding(
           'package.json',
           'low',
           'overengineering',
-          `${unused.length} dependencia(s) sin uso`,
+          `${dead.length} dependencia(s) sin uso`,
           [1],
-          `Estas dependencias están declaradas pero nadie las importa: ${unused.slice(0, 6).join(', ')}${unused.length > 6 ? '…' : ''}. Peso muerto que instala todo el mundo al clonar.`,
+          `Estas dependencias están declaradas pero nadie las importa: ${dead.slice(0, 6).join(', ')}${dead.length > 6 ? '…' : ''}. Peso muerto que instala todo el mundo al clonar.`,
           'Elimínalas de package.json (o muévelas a devDependencies si son herramientas de build).',
         ),
       )
     }
   }
 
-  // Archivos huérfanos (nadie los importa y no son entry points)
+  // Archivos huérfanos (nadie los importa y no son entry points).
+  // En árbol parcial el grafo de inbound está incompleto: no se afirma.
   const orphanFiles = files
     .filter((f) => {
+      if (f.content.length === 0) return false // solo ruta: no se sabe qué importa
       if (!/\.(ts|tsx|js|jsx|mjs|cjs|py|vue|svelte)$/.test(f.path)) return false
       if ((inbound.get(f.path) ?? 0) > 0) return false
       const base = f.path.split('/').pop() ?? ''
@@ -507,7 +540,7 @@ export function scanRepo(files: RepoFile[]): ScanResult {
     })
     .map((f) => f.path)
     .sort()
-  if (orphanFiles.length > 0) {
+  if (orphanFiles.length > 0 && !opts.partialTree) {
     findings.push(
       makeFinding(
         orphanFiles[0] ?? 'repo',
@@ -555,7 +588,7 @@ export function scanRepo(files: RepoFile[]): ScanResult {
       secretCount,
       brokenImports: findings.filter((f) => f.title.startsWith('Import fantasma')).map((f) => f.file),
       missingDeps: [...missingDepFiles.keys()],
-      unusedDeps: [...manifest.deps].filter((d) => !importedPkgs.has(d) && !d.startsWith('@types/')),
+      unusedDeps,
       orphanFiles,
       suspiciousTestFiles: fakeTests.suspiciousFiles,
     },

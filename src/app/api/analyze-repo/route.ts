@@ -18,7 +18,7 @@ import { changedPaths, diffTrees, type TreeDiff } from '@/lib/repo-diff'
 import { explainScore, mergeAndScore, verdictFromScore } from '@/lib/repo-score'
 import { auditBatch, selectAuditFiles, synthesizeReport, type ReduceResult } from '@/lib/repo-llm'
 import { buildDeterministicNarrative } from '@/lib/deterministic-report'
-import { FOLDER_CAPS } from '@/lib/folder-pick'
+import { FOLDER_CAPS, isStructuralFile } from '@/lib/folder-pick'
 import { MAX_DECOMPRESSED_BYTES, readTarTree, type TreeReadResult } from '@/lib/tar-gz'
 import type { CategoryKey } from '@/lib/vibe-types'
 
@@ -95,6 +95,8 @@ interface IngestResult {
   stars: number | null
   treeCount: number
   treePreview: string[]
+  /** Rutas de todo el árbol escaneable (GitHub): resuelve imports fuera del top-N */
+  allPaths?: string[]
   /** sha256 del contenido descargado: clave de caché */
   contentHash: string
   /** El árbol excedió el cap de lectura: se auditó el top-N por riesgo */
@@ -270,6 +272,7 @@ async function ingestGitHub(url: string, emit: Emit, opts: { token?: string; bas
     stars: null, // el tarball anónimo no expone metadatos; sin estrellas por ahora
     treeCount: headTree.treeCount,
     treePreview: headTree.treePreview,
+    allPaths: headTree.allPaths,
     contentHash: head.contentHash,
     truncated: headTree.truncated,
     diff,
@@ -278,11 +281,18 @@ async function ingestGitHub(url: string, emit: Emit, opts: { token?: string; bas
 }
 
 function ingestFolder(body: Extract<Body, { source: 'files' }>): IngestResult {
-  const files = body.files
+  const eligible = body.files
     .filter((f) => isScannablePath(f.path, f.content.length))
     .map((f) => ({ path: f.path.replace(/^\.\//, ''), content: f.content }))
-    .slice(0, MAX_SCAN_FILES)
-  if (files.length === 0) {
+  // manifiesto y tsconfig viajan siempre: sin ellos el grafo inventa fantasmas
+  const structural = eligible.filter((f) => isStructuralFile(f.path))
+  const rest = eligible.filter((f) => !isStructuralFile(f.path))
+  const contentSlots = Math.max(0, MAX_SCAN_FILES - structural.length)
+  // lo que no cabe en el presupuesto de contenido se conserva solo como ruta,
+  // para que los imports del sample resuelvan contra el árbol completo
+  const overflowPaths = rest.slice(contentSlots).map((f) => ({ path: f.path, content: '' }))
+  const files = [...structural, ...rest.slice(0, contentSlots), ...overflowPaths]
+  if (structural.length + rest.length === 0) {
     throw new Error('Ningún archivo de la carpeta es auditable (¿solo binarios o node_modules?).')
   }
   const contentHash = createHash('sha256')
@@ -293,10 +303,10 @@ function ingestFolder(body: Extract<Body, { source: 'files' }>): IngestResult {
     repoName: body.title?.trim() || 'Carpeta local',
     branch: null,
     stars: null,
-    treeCount: files.length,
+    treeCount: eligible.length,
     treePreview: files.map((f) => f.path),
     contentHash,
-    truncated: false,
+    truncated: overflowPaths.length > 0,
   }
 }
 
@@ -304,8 +314,11 @@ function ingestFolder(body: Extract<Body, { source: 'files' }>): IngestResult {
 
 function buildStructuralChecks(
   checks: ReturnType<typeof scanRepo>['checks'],
+  partial = false,
 ): StructuralCheck[] {
   const out: StructuralCheck[] = []
+  // en muestra parcial, deps sin uso y huérfanos son conteos observados, no afirmaciones
+  const sampleNote = partial ? ' (muestra parcial del árbol: puede haber más)' : ''
   out.push({
     id: 'manifest',
     label: 'Manifiesto de dependencias',
@@ -361,7 +374,7 @@ function buildStructuralChecks(
     status: checks.unusedDeps.length > 0 ? 'warn' : 'pass',
     detail:
       checks.unusedDeps.length > 0
-        ? `Declaradas y nunca importadas: ${checks.unusedDeps.slice(0, 4).join(', ')}`
+        ? `Declaradas y nunca importadas${sampleNote}: ${checks.unusedDeps.slice(0, 4).join(', ')}`
         : 'Sin dependencias muertas evidentes',
     count: checks.unusedDeps.length,
   })
@@ -371,7 +384,7 @@ function buildStructuralChecks(
     status: checks.orphanFiles.length > 0 ? 'warn' : 'pass',
     detail:
       checks.orphanFiles.length > 0
-        ? `Nadie los importa: ${checks.orphanFiles.slice(0, 3).join(', ')}`
+        ? `Nadie los importa${sampleNote}: ${checks.orphanFiles.slice(0, 3).join(', ')}`
         : 'Todos los módulos están conectados',
     count: checks.orphanFiles.length,
   })
@@ -403,8 +416,9 @@ async function runAudit(
     emit({ type: 'progress', phase: 'estructura', pct: 8, message: 'Filtrando y leyendo archivos de la carpeta…' })
     ingest = ingestFolder(body)
   }
-  const { files, repoName, branch, stars, treeCount, treePreview, contentHash, truncated, diff, baseHash } = ingest
-  const cacheKey = `repo:${repoName}@${contentHash}${diff && baseHash ? `~diff:${baseHash}` : ''}`
+  const { files, repoName, branch, stars, treeCount, treePreview, allPaths, contentHash, truncated, diff, baseHash } = ingest
+  // v2: los reportes pre-alias (falsos positivos masivos con @/*) no se sirven desde caché
+  const cacheKey = `repo:v2:${repoName}@${contentHash}${diff && baseHash ? `~diff:${baseHash}` : ''}`
   const changed = diff ? changedPaths(diff) : null
 
   // ── 2. Caché por contenido: mismo repo sin cambios → sin LLM ──
@@ -441,7 +455,7 @@ async function runAudit(
   }
 
   // ── 3. Escaneo determinista (árbol completo: contexto del grafo) ──
-  const scan = scanRepo(files)
+  const scan = scanRepo(files, { allPaths, partialTree: truncated })
   emit({
     type: 'progress',
     phase: 'estructura',
@@ -452,7 +466,10 @@ async function runAudit(
   })
 
   // ── 4. Auditoría IA por lotes — con fallback determinista sin credenciales ──
-  const auditPool = changed ? files.filter((f) => changed.has(f.path)) : files
+  // los archivos solo-ruta (sin contenido) no van al LLM: solo nutren el grafo
+  const auditPool = (changed ? files.filter((f) => changed.has(f.path)) : files).filter(
+    (f) => f.content.length > 0,
+  )
   const aiRaw: RepoFinding[] = []
   let engine: 'ia' | 'determinista' = 'ia'
   let auditedPaths: string[] = []
@@ -524,7 +541,7 @@ async function runAudit(
     onlyFiles: changed ?? undefined,
   })
   const verdict = verdictFromScore(mergedScore)
-  const structuralChecks = buildStructuralChecks(scan.checks)
+  const structuralChecks = buildStructuralChecks(scan.checks, truncated)
 
   // sin IA, la narrativa se redacta con hechos del escaneo (verificables)
   if (!reduced) {

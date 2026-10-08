@@ -77,4 +77,19 @@ describe('buildDeterministicNarrative', () => {
     expect(narrative.topRisks).toHaveLength(0)
     expect(narrative.architecture).toContain('sin manifiesto')
   })
+
+  it('la arquitectura reporta archivos ESCANEADOS, no "auditados con IA" (que es 0 sin LLM)', () => {
+    const { categories } = mergeAndScore([], [])
+    const narrative = buildDeterministicNarrative({
+      repoName: 'n',
+      branch: null,
+      verdict: 'SHIP IT',
+      stats: { filesScanned: 237, filesAudited: 0, totalLines: 9000, languages: ['TypeScript'] },
+      structural: [],
+      categories,
+      manifestName: 'package.json',
+    })
+    expect(narrative.architecture).toContain('237 archivos escaneados')
+    expect(narrative.architecture).not.toContain('0 archivos')
+  })
 })
