@@ -91,7 +91,7 @@ const RULES: RoastRule[] = [
   {
     key: 'phantomDeps',
     lines: [
-      'Importaste {n} paquete{s} ausente{s} de package.json. Confianza admirable en el universo.',
+      'Importaste {n} paquete{s} que no existen en package.json. Confianza admirable en el universo.',
       'Hay dependencias que solo existen en la imaginación de la IA. npm no las va a encontrar.',
     ],
   },
@@ -126,8 +126,8 @@ const RULES: RoastRule[] = [
 ]
 
 const DIFF_LINES = [
-  'El modo diff excluyó {n} hallazgo{s} pre-existente{s}: el resto del repo ya es museo.',
-  'Modo diff activado: {n} hallazgo{s} heredado{s} fuera del score. El daño nuevo es todo tuyo.',
+  'Además, {n} hallazgo{s} pre-existentes quedaron fuera del score: el resto del repo ya es museo.',
+  'Modo diff activado: {n} hallazgo{s} heredado{s} se quedaron fuera. El daño nuevo es todo tuyo.',
 ]
 
 const CLEAN_LINES = [

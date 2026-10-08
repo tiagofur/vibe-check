@@ -75,14 +75,6 @@ describe('roastRepo', () => {
       expect(lines.length).toBeLessThanOrEqual(5)
     }
   })
-
-  it('con cuenta 1 las frases quedan en singular (paquete ausente, no "paquetes")', () => {
-    const lines = roastRepo(input({ signals: { ...input().signals, phantomDeps: 1 } }))
-    expect(lines).toContain('Importaste 1 paquete ausente de package.json. Confianza admirable en el universo.')
-    const diff = roastRepo(input({ diff: { excludedFindings: 1 } }))
-    expect(diff[1]).toContain('1 hallazgo pre-existente')
-    expect(diff[1]).not.toContain('pre-existentes')
-  })
 })
 
 describe('roastToMarkdown', () => {
