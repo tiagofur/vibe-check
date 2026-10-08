@@ -75,6 +75,24 @@ describe('roastRepo', () => {
       expect(lines.length).toBeLessThanOrEqual(5)
     }
   })
+
+  it('con cuenta 1 las frases quedan en singular, para cualquier pick del pool', () => {
+    // el pick depende del hash del nombre: recorremos 50 y validamos el invariante
+    for (let i = 0; i < 50; i++) {
+      const name = `repo-${i}`
+      const phantom = roastRepo(input({ repoName: name, signals: { ...input().signals, phantomDeps: 1 } }))
+      for (const line of phantom) {
+        if (line.startsWith('Importaste 1 paquete')) {
+          expect(line, name).toContain('1 paquete ausente de package.json')
+          expect(line, name).not.toContain('paquetes')
+        }
+      }
+      const diff = roastRepo(input({ repoName: name, diff: { excludedFindings: 1 } }))
+      expect(diff[1], name).toContain('1 hallazgo')
+      expect(diff[1], name).not.toContain('hallazgos')
+      expect(diff[1], name).not.toContain('quedaron fuera')
+    }
+  })
 })
 
 describe('roastToMarkdown', () => {
