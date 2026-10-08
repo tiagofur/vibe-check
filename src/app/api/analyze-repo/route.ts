@@ -419,7 +419,7 @@ async function runAudit(
   const { files, repoName, branch, stars, treeCount, treePreview, allPaths, contentHash, truncated, diff, baseHash } = ingest
   // Esquema de caché: BUMPEAR cuando cambie el motor/scoring — el hash del repo
   // no cambia cuando cambia VibeCheck, y un reporte viejo no debe servirse nunca
-  const CACHE_SCHEMA = 'v3'
+  const CACHE_SCHEMA = 'v6'
   const cacheKey = `repo:${CACHE_SCHEMA}:${repoName}@${contentHash}${diff && baseHash ? `~diff:${baseHash}` : ''}`
   const changed = diff ? changedPaths(diff) : null
 

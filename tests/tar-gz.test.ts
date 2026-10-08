@@ -107,11 +107,16 @@ describe('TopRiskKeeper', () => {
     await keeper.consider('src/api/c.ts', fakeRead('c')) // llena el cupo de riesgo alto
     await keeper.consider('tsconfig.json', fakeRead('{"compilerOptions":{"paths":{"@/*":["./src/*"]}}}'))
     await keeper.consider('package.json', fakeRead('{"name":"x"}'))
-    await keeper.consider('nested/package.json', fakeRead('{"name":"nested"}')) // solo la raíz es estructural
+    // anidados también: en monorepos cada paquete declara sus propias deps
+    await keeper.consider('packages/api-client/package.json', fakeRead('{"name":"@x/api-client"}'))
+    await keeper.consider('apps/desktop/tsconfig.json', fakeRead('{"compilerOptions":{}}'))
+    await keeper.consider('node_modules/react/package.json', fakeRead('{"name":"react"}')) // pesado: jamás
     expect(keeper.paths).toContain('tsconfig.json')
     expect(keeper.paths).toContain('package.json')
-    expect(keeper.paths).not.toContain('nested/package.json')
-    expect(keeper.files.find((f) => f.path === 'tsconfig.json')?.content).toContain('compilerOptions')
+    expect(keeper.paths).toContain('packages/api-client/package.json')
+    expect(keeper.paths).toContain('apps/desktop/tsconfig.json')
+    expect(keeper.paths).not.toContain('node_modules/react/package.json')
+    expect(keeper.files.find((f) => f.path === 'packages/api-client/package.json')?.content).toContain('@x/api-client')
     // los estructurales no consumen cupo del top-N
     expect(keeper.paths.filter((p) => p.startsWith('src/'))).toHaveLength(2)
   })
@@ -141,6 +146,32 @@ describe('readTarTree', () => {
     expect(tree.treeCount).toBe(1)
     expect(tree.truncated).toBe(false)
     expect(tree.files).toHaveLength(1)
+  })
+
+  it('monorepo: los package.json anidados viajan con contenido aunque el cap los patearía', async () => {
+    // escenario dev_deck: 712 archivos, cap 120 — sin esta garantía la unión de
+    // workspaces se queda sin datos y cada import npm sale como dependencia fantasma
+    const entries = [
+      { path: `${ROOT}/package.json`, content: '{"name":"raiz","devDependencies":{"eslint":"^9"}}' },
+      { path: `${ROOT}/apps/desktop/package.json`, content: '{"name":"@x/desktop","dependencies":{"react":"^19"}}' },
+      { path: `${ROOT}/packages/api-client/package.json`, content: '{"name":"@x/api-client","dependencies":{"uuid":"^9"}}' },
+      { path: `${ROOT}/packages/ui/tsconfig.json`, content: '{"compilerOptions":{"strict":true}}' },
+    ]
+    for (let i = 0; i < 10; i++) {
+      entries.push({ path: `${ROOT}/src/auth/modulo${i}.ts`, content: `export const m${i} = 1\n` })
+    }
+    const tar = buildTarBuffer(entries)
+    const tree = await readTarTree(asGzStream(tar), { maxFiles: 3 })
+    expect(tree.truncated).toBe(true)
+    const paths = tree.files.map((f) => f.path)
+    // los 4 manifiestos/configs sobreviven con contenido pese al cap…
+    for (const e of entries.slice(0, 4)) {
+      const rel = e.path.slice(ROOT.length + 1)
+      expect(paths).toContain(rel)
+      expect(tree.files.find((f) => f.path === rel)?.content).toBe(e.content)
+    }
+    // …y no consumen cupo: los 3 slots de riesgo quedan para el código fuente
+    expect(paths.filter((p) => p.startsWith('src/auth/'))).toHaveLength(3)
   })
 
   it('allPaths registra el árbol escaneable completo, incluido lo evictado por el cap', async () => {

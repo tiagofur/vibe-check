@@ -70,6 +70,18 @@ const RE_TEST_PATH =
 
 const ENV_EXAMPLE_BASENAMES = new Set(['.env.example', '.env.sample', '.env.template', '.env.defaults'])
 
+/** ¿Está el archivo hecho para commitearse con valores de ejemplo?
+ *  (.env.example/.sample/.template o sufijo .example/.sample/.template) */
+export function isEnvExamplePath(path: string): boolean {
+  const base = path.split('/').pop() ?? path
+  return (
+    ENV_EXAMPLE_BASENAMES.has(base) ||
+    base.endsWith('.example') ||
+    base.endsWith('.sample') ||
+    base.endsWith('.template')
+  )
+}
+
 /** En archivos .env* los valores van SIN comillas: STRIPE_WEBHOOK_SECRET=whsec_… */
 const SECRET_ENV_UNQUOTED: (typeof SECRET_PATTERNS)[number] = {
   re: /[A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|APIKEY)[A-Z0-9_]*=[A-Za-z0-9_\-./+]{16,}/,
@@ -499,11 +511,7 @@ export function scanRepo(files: RepoFile[], opts: ScanOptions = {}): ScanResult 
 
     const base = f.path.split('/').pop() ?? ''
     // .env.example/.sample/.template están hechos para commitearse: no son filtraciones
-    const envExample =
-      ENV_EXAMPLE_BASENAMES.has(base) ||
-      base.endsWith('.example') ||
-      base.endsWith('.sample') ||
-      base.endsWith('.template')
+    const envExample = isEnvExamplePath(f.path)
     if (base.startsWith('.env') && !envExample) {
       envFiles.push(f.path)
     }
@@ -665,6 +673,19 @@ export function scanRepo(files: RepoFile[], opts: ScanOptions = {}): ScanResult 
         'Confirma si son punto de entrada externo (scripts, handlers); si no, elimínalos o conéctalos.',
       ),
     )
+  }
+
+  // Que un .env esté commiteado se decide por RUTA, no por contenido: cuenta el
+  // árbol completo aunque el top-N por riesgo no retuviera el archivo (el
+  // contenido solo hace falta para escanear secretos DENTRO del archivo).
+  if (opts.allPaths) {
+    const seenEnv = new Set(envFiles)
+    for (const p of opts.allPaths) {
+      if (seenEnv.has(p)) continue
+      const base = p.split('/').pop() ?? ''
+      if (base.startsWith('.env') && !isEnvExamplePath(p)) envFiles.push(p)
+    }
+    envFiles.sort()
   }
 
   // .env commiteado

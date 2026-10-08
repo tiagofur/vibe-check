@@ -6,6 +6,7 @@
 
 import type { RepoFinding, RepoReport, ScoreDeduction, ScoreExplanation } from './repo-types'
 import { CATEGORY_META, SEVERITY_META, type CategoryKey, scoreFromFindings, verdictFromScore } from './vibe-types'
+import { isEnvExamplePath } from './repo-scan'
 
 const CATEGORY_KEYS: CategoryKey[] = ['security', 'hallucination', 'bugs', 'overengineering']
 const SEVERITY_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 }
@@ -39,6 +40,24 @@ export function dropAiDuplicates(scanFindings: RepoFinding[], aiFindings: RepoFi
   })
 }
 
+/**
+ * Los .env.example/.sample/.template existen PARA commitearse con valores de
+ * ejemplo: el escáner determinista no los trata como filtraciones, así que un
+ * hallazgo IA de seguridad sobre ellos tampoco puede clavar el score. Se
+ * degrada a low (si el valor fuera real, igual deja la señal).
+ */
+export function downgradeAiEnvExampleSecrets(aiFindings: RepoFinding[]): RepoFinding[] {
+  return aiFindings.map((f) =>
+    f.origin === 'ai' && f.category === 'security' && f.severity !== 'low' && isEnvExamplePath(f.file)
+      ? {
+          ...f,
+          severity: 'low',
+          explanation: `${f.explanation} El archivo es un .env.example: está hecho para commitearse con valores de ejemplo.`,
+        }
+      : f,
+  )
+}
+
 export interface MergeOptions {
   /**
    * Modo diff: si se pasa, solo los hallazgos en estos archivos puntúan.
@@ -60,7 +79,8 @@ export function mergeAndScore(
   aiFindings: RepoFinding[],
   opts?: MergeOptions,
 ): MergeResult {
-  const allFindings = dedupeFindings([...scanFindings, ...dropAiDuplicates(scanFindings, aiFindings)])
+  const aiFindingsFiltered = downgradeAiEnvExampleSecrets(aiFindings)
+  const allFindings = dedupeFindings([...scanFindings, ...dropAiDuplicates(scanFindings, aiFindingsFiltered)])
   const scored = opts?.onlyFiles ? allFindings.filter((f) => opts.onlyFiles!.has(f.file)) : allFindings
   const excludedCount = allFindings.length - scored.length
 

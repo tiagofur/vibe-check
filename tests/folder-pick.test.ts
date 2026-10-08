@@ -45,15 +45,26 @@ describe('omittedSummary', () => {
 })
 
 describe('isStructuralFile', () => {
-  it('reconoce manifiesto y configs de alias solo en la raíz', () => {
+  it('reconoce manifiesto y configs de alias en la raíz', () => {
     expect(isStructuralFile('package.json')).toBe(true)
     expect(isStructuralFile('tsconfig.json')).toBe(true)
     expect(isStructuralFile('jsconfig.json')).toBe(true)
     expect(isStructuralFile('go.mod')).toBe(true)
     expect(isStructuralFile('requirements.txt')).toBe(true)
     expect(isStructuralFile('Cargo.toml')).toBe(true)
-    expect(isStructuralFile('packages/app/package.json')).toBe(false)
-    expect(isStructuralFile('src/tsconfig.json')).toBe(false)
+    expect(isStructuralFile('pnpm-workspace.yaml')).toBe(true)
     expect(isStructuralFile('tsconfig.app.json')).toBe(false)
+  })
+
+  it('en monorepos cuenta package.json/tsconfig ANIDADOS (si no, la unión de workspaces se queda sin contenido)', () => {
+    expect(isStructuralFile('packages/app/package.json')).toBe(true)
+    expect(isStructuralFile('apps/desktop/tsconfig.json')).toBe(true)
+    expect(isStructuralFile('apps/web/renderer/jsconfig.json')).toBe(true)
+    // los manifiestos de otros ecosistemas solo valen en la raíz
+    expect(isStructuralFile('backend/go.mod')).toBe(false)
+    expect(isStructuralFile('services/api/requirements.txt')).toBe(false)
+    // jamás desde directorios pesados (un node_modules commiteado los inunda)
+    expect(isStructuralFile('node_modules/react/package.json')).toBe(false)
+    expect(isStructuralFile('packages/x/dist/package.json')).toBe(false)
   })
 })

@@ -83,6 +83,9 @@ const AUDIT_SYSTEM = `Eres VibeCheck, un auditor de código ADVERSARIAL especial
 REGLAS:
 - Usa EXACTAMENTE las rutas de archivo que te doy (campo "file").
 - "lines" son números de línea reales del archivo (1-indexed).
+- Los archivos .env.example/.env.sample/.env.template existen PARA commitearse con valores de ejemplo: NO son filtraciones, no generes hallazgos de seguridad por ellos.
+- Verifica el CÓDIGO ejecutable, no los comentarios: suelen describir fixes históricos o riesgos ya resueltos (típico en migraciones). Un comentario que advierte de un peligro NO es en sí un bug.
+- Un monorepo puede declararse en package.json ("workspaces") o en pnpm-workspace.yaml/turbo.json/lerna.json: no marques "faltan workspaces" si otra de estas configs lo declara.
 - Prioriza IMPACTO: máximo 4 hallazgos por archivo; ignora estilo y nits.
 - explanation y fix en ESPAÑOL, máximo 2 frases cada uno, sin markdown.
 - Si un archivo está limpio, NO generes hallazgo para él.

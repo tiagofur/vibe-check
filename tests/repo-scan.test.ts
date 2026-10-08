@@ -305,6 +305,26 @@ describe('scanRepo · árbol parcial (top-N por riesgo) y archivos solo-ruta', (
     expect(res.findings.some((f) => f.title.startsWith('Import fantasma'))).toBe(true)
   })
 
+  it('un .env commiteado se detecta por RUTA vía allPaths aunque el top-N no retuviera su contenido', () => {
+    // caso real dev_deck: backend/.env con JWT viajaba en el árbol pero fuera
+    // del top-120 → el chequeo decía "ningún .env" mientras el CLI sí lo veía
+    const res = scanRepo([pkg, tsconfig, page], {
+      allPaths: ['app/page.tsx', 'package.json', 'tsconfig.json', 'backend/.env', 'apps/web/.env', 'deploy/.env.example'],
+    })
+    const env = res.findings.find((f) => f.title.includes('entorno commiteado'))
+    expect(env).toBeTruthy()
+    expect(env?.severity).toBe('high')
+    expect(res.checks.envFiles).toEqual(['apps/web/.env', 'backend/.env']) // .env.example excluido, orden estable
+  })
+
+  it('sin .env en el árbol no hay hallazgo de entorno', () => {
+    const res = scanRepo([pkg, tsconfig, page], {
+      allPaths: ['app/page.tsx', 'package.json', 'deploy/.env.example'],
+    })
+    expect(res.findings.some((f) => f.title.includes('entorno commiteado'))).toBe(false)
+    expect(res.checks.envFiles).toEqual([])
+  })
+
   it('partialTree suprime deps sin uso y huérfanos: la muestra no alcanza para afirmarlo', () => {
     const pkgDead = {
       path: 'package.json',

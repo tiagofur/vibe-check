@@ -73,6 +73,22 @@ describe('mergeAndScore (fuente compartida route/CLI)', () => {
     expect(dropAiDuplicates([scanLejos], [cerca])).toEqual([cerca])
   })
 
+  it('un secreto IA en .env.example se degrada a low: el archivo existe PARA commitear valores de ejemplo', () => {
+    const aiEjemplo: RepoFinding = { ...finding('deploy/.env.example', 'critical', 'security'), title: 'Contraseña en texto plano', origin: 'ai' as const }
+    const aiReal: RepoFinding = { ...finding('backend/.env', 'critical', 'security'), title: 'JWT secreto commiteado', origin: 'ai' as const }
+    const scanEjemplo: RepoFinding = { ...finding('x/.env.template', 'critical', 'security'), title: 'Placeholder de demo', origin: 'scan' as const }
+    const { allFindings, score } = mergeAndScore([], [aiEjemplo, aiReal, scanEjemplo])
+    const porTitulo = new Map(allFindings.map((f) => [f.title, f]))
+    // el IA sobre .env.example baja a low y queda la nota; no impone techo duro
+    expect(porTitulo.get('Contraseña en texto plano')?.severity).toBe('low')
+    expect(porTitulo.get('Contraseña en texto plano')?.explanation).toContain('.env.example')
+    // un crítico IA sobre un .env REAL no se toca; y un crítico del scan en un
+    // template tampoco (el filtro es solo para hallazgos IA)
+    expect(porTitulo.get('JWT secreto commiteado')?.severity).toBe('critical')
+    expect(porTitulo.get('Placeholder de demo')?.severity).toBe('critical')
+    expect(score).toBeLessThanOrEqual(35) // siguen los críticos de verdad
+  })
+
   it('modo diff: solo puntúan los hallazgos de archivos cambiados', () => {
     const { score, excludedCount, categories } = mergeAndScore([
       finding('nuevo.ts', 'critical', 'security'),

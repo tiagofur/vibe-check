@@ -32,6 +32,9 @@ export const RE_HEAVY_PATH =
  * Manifiestos y configs de alias que el grafo de imports necesita SÍ o SÍ:
  * sin package.json no hay deps fantasma y sin tsconfig/jsconfig los imports
  * "@/*" se vuelven falsos positivos masivos. Nunca se recortan por topes.
+ * En monorepos los de JS/TS cuentan ANIDADOS también: si el top-N por riesgo
+ * los desaloja, la unión de workspaces se queda sin contenido y cada import
+ * npm del repo sale como dependencia fantasma.
  */
 export const STRUCTURAL_FILES = new Set([
   'package.json',
@@ -40,11 +43,20 @@ export const STRUCTURAL_FILES = new Set([
   'go.mod',
   'requirements.txt',
   'Cargo.toml',
+  // declara el monorepo en pnpm: sin verla, "no hay workspaces" parece un bug
+  'pnpm-workspace.yaml',
 ])
 
-/** ¿Es un archivo estructural (raíz del repo) que el motor exige tener? */
+/** Basenames estructurales que cuentan a cualquier profundidad (monorepos) */
+const NESTED_STRUCTURAL_BASENAMES = new Set(['package.json', 'tsconfig.json', 'jsconfig.json'])
+
+/** ¿Es un archivo estructural que el motor exige tener? En la raíz valen todos
+ *  los manifiestos; anidados (monorepos), solo los de JS/TS. */
 export function isStructuralFile(path: string): boolean {
-  return STRUCTURAL_FILES.has(path)
+  if (STRUCTURAL_FILES.has(path)) return true
+  if (inHeavyPath(path)) return false
+  const base = path.split('/').pop() ?? ''
+  return NESTED_STRUCTURAL_BASENAMES.has(base)
 }
 
 const BINARY_EXT = new Set([
