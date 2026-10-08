@@ -18,6 +18,9 @@ import { roastRepo } from './src/lib/roast'
 import { CATEGORY_META, SEVERITY_META, VERDICT_META, verdictFromScore, type CategoryKey } from './src/lib/vibe-types'
 import type { RepoFile } from './src/lib/repo-types'
 
+/** Truncado de contenido al leer: los archivos grandes aportan imports, no texto completo */
+const READ_CAP = 64 * 1024
+
 function walkDir(dir: string, root: string, out: RepoFile[]): void {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const abs = join(dir, entry.name)
@@ -29,7 +32,8 @@ function walkDir(dir: string, root: string, out: RepoFile[]): void {
       const size = statSync(abs).size
       if (!isScannablePath(rel, size)) continue
       try {
-        out.push({ path: rel, content: readFileSync(abs, 'utf8') })
+        // el contenido se trunca: los imports viven arriba del archivo
+        out.push({ path: rel, content: readFileSync(abs, 'utf8').slice(0, READ_CAP) })
       } catch {
         /* ilegible: se ignora */
       }

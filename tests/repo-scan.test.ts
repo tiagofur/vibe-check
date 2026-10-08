@@ -177,6 +177,98 @@ describe('scanRepo · casos límite', () => {
   })
 })
 
+describe('scanRepo · aliases de tsconfig/jsconfig', () => {
+  const pkg = { path: 'package.json', content: JSON.stringify({ name: 'x', dependencies: {} }) }
+
+  it('resuelve @/ vía compilerOptions.paths: sin fantasmas ni huérfanos', () => {
+    const res = scanRepo([
+      pkg,
+      { path: 'tsconfig.json', content: JSON.stringify({ compilerOptions: { baseUrl: '.', paths: { '@/*': ['./src/*'] } } }) },
+      { path: 'app/page.tsx', content: `import { hola } from '@/lib/saludo'\nexport default () => hola\n` },
+      { path: 'src/lib/saludo.ts', content: 'export const hola = 1\n' },
+    ])
+    expect(res.findings.filter((f) => f.title.startsWith('Import fantasma'))).toEqual([])
+    expect(res.checks.missingDeps).toEqual([])
+    expect(res.checks.orphanFiles).toEqual([])
+  })
+
+  it('un alias que no resuelve a nada sigue marcándose como fantasma', () => {
+    const res = scanRepo([
+      pkg,
+      { path: 'tsconfig.json', content: JSON.stringify({ compilerOptions: { paths: { '@/*': ['./src/*'] } } }) },
+      { path: 'a.tsx', content: `import { x } from '@/lib/missing'\nexport const y = x\n` },
+    ])
+    expect(res.findings.some((f) => f.title.startsWith('Import fantasma'))).toBe(true)
+  })
+
+  it('imports a directorios generados (.next) no se marcan: no son verificables', () => {
+    const res = scanRepo([
+      pkg,
+      { path: 'next-env.d.ts', content: `import "./.next/dev/types/routes.d.ts"\n` },
+      { path: 'a.ts', content: 'export const a = 1\n' },
+    ])
+    expect(res.findings.filter((f) => f.title.startsWith('Import fantasma'))).toEqual([])
+  })
+
+  it('tolera tsconfig con comentarios y trailing commas', () => {
+    const res = scanRepo([
+      pkg,
+      {
+        path: 'tsconfig.json',
+        content: `{\n  // paths del proyecto\n  "compilerOptions": {\n    "paths": { "@/*": ["./src/*"], },\n  },\n}`,
+      },
+      { path: 'a.ts', content: `import { x } from '@/x'\nexport const y = x\n` },
+      { path: 'src/x.ts', content: 'export const x = 1\n' },
+    ])
+    expect(res.findings.filter((f) => f.title.startsWith('Import fantasma'))).toEqual([])
+  })
+
+  it('el /* de "@/…" y los globs "**/*.ts" no se confunden con comentarios', () => {
+    // réplica del tsconfig típico de Next: sin esto, el stripper de comentarios
+    // borra el mapping completo y todos los @/ vuelven a ser "fantasmas"
+    const res = scanRepo([
+      pkg,
+      {
+        path: 'tsconfig.json',
+        content: JSON.stringify({
+          compilerOptions: { paths: { '@/*': ['./src/*'] } },
+          include: ['next-env.d.ts', '**/*.ts', '**/*.tsx', '.next/types/**/*.ts'],
+        }),
+      },
+      { path: 'app/page.tsx', content: `import { hola } from '@/lib/saludo'\nexport default () => hola\n` },
+      { path: 'src/lib/saludo.ts', content: 'export const hola = 1\n' },
+    ])
+    expect(res.findings.filter((f) => f.title.startsWith('Import fantasma'))).toEqual([])
+    expect(res.checks.orphanFiles).toEqual([])
+  })
+
+  it('jsconfig.json también sirve de fuente de aliases', () => {
+    const res = scanRepo([
+      pkg,
+      { path: 'jsconfig.json', content: JSON.stringify({ compilerOptions: { paths: { '@components/*': ['./ui/*'] } } }) },
+      { path: 'app.ts', content: `import { btn } from '@components/btn'\nconsole.log(btn)\n` },
+      { path: 'ui/btn.ts', content: 'export const btn = 1\n' },
+    ])
+    expect(res.findings.filter((f) => f.title.startsWith('Import fantasma'))).toEqual([])
+    expect(res.checks.orphanFiles).toEqual([])
+  })
+
+  it('aliases de una sola letra no capturan imports que no les corresponden', () => {
+    // '#' mapea a src, pero 'react' no empieza con '#' y no debe tocarse
+    const res = scanRepo([
+      {
+        path: 'package.json',
+        content: JSON.stringify({ name: 'x', dependencies: { react: '19' } }),
+      },
+      { path: 'tsconfig.json', content: JSON.stringify({ compilerOptions: { paths: { '#*': ['./src/*'] } } }) },
+      { path: 'a.tsx', content: `import { useState } from 'react'\nimport { u } from '#utils'\nexport const q = [useState, u]\n` },
+      { path: 'src/utils.ts', content: 'export const u = 1\n' },
+    ])
+    expect(res.findings.filter((f) => f.title.startsWith('Import fantasma'))).toEqual([])
+    expect(res.checks.missingDeps).toEqual([])
+  })
+})
+
 describe('selectAuditFiles', () => {
   const manifest: RepoFile = {
     path: 'package.json',

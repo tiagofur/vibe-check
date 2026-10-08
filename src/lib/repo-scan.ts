@@ -101,7 +101,10 @@ export function isLockFile(path: string): boolean {
   return LOCK_FILES.has(path.split('/').pop() ?? '')
 }
 
-/** ¿Este path del árbol vale la pena escanearse? (sin contenido) */
+/** ¿Este path del árbol vale la pena escanearse? (sin contenido)
+ *  El techo de inclusión es alto a propósito: los archivos grandes
+ *  (ej. page.tsx de 50KB) aportan imports al grafo aunque su contenido
+ *  se trunque al leer (ver walkDir/extractAndRead, 64KB). */
 export function isScannablePath(path: string, size: number): boolean {
   if (path.includes('..')) return false
   const segs = path.split('/')
@@ -109,7 +112,7 @@ export function isScannablePath(path: string, size: number): boolean {
   if (isLockFile(path)) return false
   const ext = extOf(path)
   if (!ext || BINARY_EXT.has(ext)) return false
-  if (size > 40 * 1024) return false
+  if (size > 256 * 1024) return false
   return true
 }
 
@@ -163,6 +166,108 @@ function normalizeRel(fromFile: string, rel: string): string {
 
 const RESOLVE_EXTS = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.py', '.vue', '.svelte', '.css']
 const INDEX_BASES = ['/index', '/__index']
+
+// ── Aliases de tsconfig/jsconfig (@/x → src/x) ─────────────
+
+export interface AliasConfig {
+  /** baseUrl de tsconfig ('' = raíz del repo) */
+  baseUrl: string
+  /** prefijos sin el '*' final, ordenados por especificidad */
+  prefixes: { prefix: string; target: string }[]
+}
+
+const EMPTY_ALIASES: AliasConfig = { baseUrl: '', prefixes: [] }
+
+/** Quita comentarios de JSONC sin tocar strings (el `/*` de "@/…" no es un comentario) */
+function stripJsonc(src: string): string {
+  let out = ''
+  let inStr = false
+  let inLine = false
+  let inBlock = false
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]
+    const next = src[i + 1]
+    if (inLine) {
+      if (c === '\n') {
+        inLine = false
+        out += c
+      }
+      continue
+    }
+    if (inBlock) {
+      if (c === '*' && next === '/') {
+        inBlock = false
+        i++
+      }
+      continue
+    }
+    if (inStr) {
+      out += c
+      if (c === '\\') {
+        out += next ?? ''
+        i++
+      } else if (c === '"') inStr = false
+      continue
+    }
+    if (c === '"') {
+      inStr = true
+      out += c
+      continue
+    }
+    if (c === '/' && next === '/') {
+      inLine = true
+      continue
+    }
+    if (c === '/' && next === '*') {
+      inBlock = true
+      continue
+    }
+    out += c
+  }
+  return out
+}
+
+/** Lee compilerOptions.paths; tolera comentarios y trailing commas de tsconfig */
+export function parseAliasConfig(file: RepoFile | undefined): AliasConfig {
+  if (!file) return EMPTY_ALIASES
+  try {
+    const json = JSON.parse(stripJsonc(file.content).replace(/,(\s*[}\]])/g, '$1')) as {
+      compilerOptions?: { baseUrl?: string; paths?: Record<string, string[]> }
+    }
+    const paths = json.compilerOptions?.paths
+    if (!paths) return EMPTY_ALIASES
+    const baseUrl = (json.compilerOptions?.baseUrl ?? '.').replace(/^\.\//, '').replace(/\/$/, '')
+    const prefixes = Object.entries(paths).flatMap(([key, targets]) =>
+      (targets ?? []).map((t) => ({
+        prefix: key.endsWith('*') ? key.slice(0, -1) : key,
+        target: (t ?? '').replace(/\*$/, '').replace(/^\.\//, ''),
+      })),
+    )
+    prefixes.sort((a, b) => b.prefix.length - a.prefix.length)
+    return { baseUrl, prefixes }
+  } catch {
+    return EMPTY_ALIASES
+  }
+}
+
+/** Mapea un import con alias a su ruta real desde la raíz; null si no aplica ninguno */
+export function applyAlias(mod: string, aliases: AliasConfig): string | null {
+  for (const { prefix, target } of aliases.prefixes) {
+    if (mod === prefix) return aliases.baseUrl ? `${aliases.baseUrl}/${target}` : target
+  }
+  for (const { prefix, target } of aliases.prefixes) {
+    if (mod.startsWith(prefix)) {
+      const mapped = target + mod.slice(prefix.length)
+      return aliases.baseUrl ? `${aliases.baseUrl}/${mapped}` : mapped
+    }
+  }
+  return null
+}
+
+/** Imports hacia directorios generados (.next, dist…) no son verificables: no se marcan */
+function pointsIntoGenerated(base: string): boolean {
+  return base.split('/').some((seg) => SKIP_DIRS.has(seg))
+}
 
 function resolves(fromFile: string, rel: string, pathSet: Set<string>): boolean {
   const base = normalizeRel(fromFile, rel)
@@ -255,6 +360,10 @@ export function scanRepo(files: RepoFile[]): ScanResult {
   }
 
   // ── Escaneo por archivo ──────────────────────────────────
+  const aliasFile =
+    files.find((f) => f.path === 'tsconfig.json') ?? files.find((f) => f.path === 'jsconfig.json')
+  const aliases = parseAliasConfig(aliasFile ?? undefined)
+
   const externalUsed = new Set<string>()
   const importedPkgs = new Set<string>()
   const inbound = new Map<string, number>()
@@ -263,6 +372,32 @@ export function scanRepo(files: RepoFile[]): ScanResult {
   const envFiles: string[] = []
   let secretCount = 0
   const missingDepFiles = new Map<string, string[]>()
+
+  /** Verifica un import local (spec = texto original; probe = ruta a resolver;
+   *  fromRoot = el probe es raíz-relativo, como los alias de tsconfig) */
+  const checkLocalImport = (file: RepoFile, spec: string, probe: string, fromRoot = false): void => {
+    const from = fromRoot ? '' : file.path
+    if (!resolves(from, probe, pathSet)) {
+      if (pointsIntoGenerated(normalizeRel(from, probe))) return
+      findings.push(
+        makeFinding(
+          file.path,
+          'high',
+          'hallucination',
+          'Import fantasma: módulo local inexistente',
+          [lineOf(file.content, spec)],
+          `El archivo importa "${spec}" pero esa ruta no existe en el repositorio. La IA escribió una llamada a un módulo que nunca creó: el build falla en cuanto se ejecuta.`,
+          'Crea el módulo faltante, corrige la ruta del import o elimina la dependencia si no se usa.',
+        ),
+      )
+      return
+    }
+    const target = normalizeRel(from, probe)
+    const resolved =
+      RESOLVE_EXTS.map((e) => target + e).find((p) => pathSet.has(p)) ??
+      INDEX_BASES.map((i) => RESOLVE_EXTS.slice(1).map((e) => target + i + e)).flat().find((p) => pathSet.has(p))
+    if (resolved) inbound.set(resolved, (inbound.get(resolved) ?? 0) + 1)
+  }
 
   for (const f of files) {
     totalLines += f.content.split('\n').length
@@ -297,27 +432,13 @@ export function scanRepo(files: RepoFile[]): ScanResult {
 
     // Imports
     for (const mod of extractModules(f.path, f.content)) {
-      if (isRelative(mod)) {
+      const aliasTarget = applyAlias(mod, aliases)
+      if (aliasTarget !== null) {
+        // alias de tsconfig: resuelve desde la raíz del repo
+        checkLocalImport(f, mod, aliasTarget, true)
+      } else if (isRelative(mod)) {
         if (f.path.endsWith('.py')) continue
-        if (!resolves(f.path, mod, pathSet)) {
-          findings.push(
-            makeFinding(
-              f.path,
-              'high',
-              'hallucination',
-              'Import fantasma: módulo local inexistente',
-              [lineOf(f.content, mod)],
-              `El archivo importa "${mod}" pero esa ruta no existe en el repositorio. La IA escribió una llamada a un módulo que nunca creó: el build falla en cuanto se ejecuta.`,
-              'Crea el módulo faltante, corrige la ruta del import o elimina la dependencia si no se usa.',
-            ),
-          )
-        } else {
-          const target = normalizeRel(f.path, mod)
-          const resolved =
-            RESOLVE_EXTS.map((e) => target + e).find((p) => pathSet.has(p)) ??
-            INDEX_BASES.map((i) => RESOLVE_EXTS.slice(1).map((e) => target + i + e)).flat().find((p) => pathSet.has(p))
-          if (resolved) inbound.set(resolved, (inbound.get(resolved) ?? 0) + 1)
-        }
+        checkLocalImport(f, mod, mod)
       } else if (!isBuiltin(mod)) {
         const pkg = pkgOf(mod)
         if (!pkg) continue
@@ -378,7 +499,9 @@ export function scanRepo(files: RepoFile[]): ScanResult {
       if (!/\.(ts|tsx|js|jsx|mjs|cjs|py|vue|svelte)$/.test(f.path)) return false
       if ((inbound.get(f.path) ?? 0) > 0) return false
       const base = f.path.split('/').pop() ?? ''
-      if (/^(index|main|app|server|__init__|mod|wsgi|manage)\.[a-z]+$/.test(base)) return false
+      if (/^(index|main|app|server|cli|bin|__init__|mod|wsgi|manage)\.[a-z]+$/.test(base)) return false
+      // archivos ruteados por convención del framework: nunca se importan
+      if (/(^|\/)(app|pages|routes|screens|views)\//.test(`${f.path}/`)) return false
       if (/config|setup|\.d\.ts$|test|spec|stories|script/i.test(f.path)) return false
       return true
     })

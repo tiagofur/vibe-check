@@ -199,7 +199,8 @@ async function extractAndRead(
   const files: RepoFile[] = []
   for (const f of selected) {
     try {
-      const content = await readFile(f.abs, 'utf8')
+      // truncado al leer: los archivos grandes aportan imports al grafo, no texto completo
+      const content = (await readFile(f.abs, 'utf8')).slice(0, 64 * 1024)
       files.push({ path: f.path, content })
     } catch {
       /* archivo ilegible: se ignora */
