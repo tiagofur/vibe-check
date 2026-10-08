@@ -1,13 +1,16 @@
 # VibeCheck
 
 [![CI](https://github.com/tiagofur/vibe-check/actions/workflows/ci.yml/badge.svg)](https://github.com/tiagofur/vibe-check/actions/workflows/ci.yml)
+[![Self-audit](https://github.com/tiagofur/vibe-check/actions/workflows/self-audit.yml/badge.svg)](https://github.com/tiagofur/vibe-check/actions/workflows/self-audit.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
-[![Tests](https://img.shields.io/badge/tests-43%20en%20verde-emerald)](tests)
+[![Tests](https://img.shields.io/badge/tests-75%20en%20verde-emerald)](tests)
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/tiagofur)
 
 > **Due diligence adversarial para repositorios en la era del vibe coding.** ¿Ese repo lo escribió una IA a las 3 AM? Descúbrelo **antes de clonar**.
+>
+> **Antes de subirlo, hazle VibeCheck.**
 
 [Read in English](README.md) · [Inicio rápido](#inicio-rápido) · [Documentación](#documentación) · [API](#api) · [Roadmap](#roadmap) · [Contribuir](#contribuir) · [Issues](https://github.com/tiagofur/vibe-check/issues)
 
@@ -36,7 +39,9 @@ VibeCheck está construido exactamente para ese hueco.
 | 🐛 Bugs | 0.25 | Off-by-one, null sin manejar, race conditions, **tests falsos** (que no pueden fallar) |
 | 🏭 Sobre-ingeniería | 0.15 | Abstracciones injustificadas, código muerto, deps sin uso, archivos huérfanos |
 
-Además, un **motor determinista** (100% reproducible, cero LLM) verifica los chequeos estructurales: grafo de imports vs. manifiesto, dependencias fantasma, imports rotos, secretos por patrón, `.env` commiteado, deps muertas y archivos que nadie importa.
+Además, un **motor determinista** (100% reproducible, cero LLM) verifica los chequeos estructurales: grafo de imports vs. manifiesto (incluyendo **aliases de tsconfig/jsconfig**), dependencias fantasma, imports rotos, secretos por patrón, `.env` commiteado, deps muertas y archivos que nadie importa. También trae un **detector de tests falsos**: suites que no pueden fallar (cero asserts), assertions tautológicas (`expect(true).toBe(true)`), cuerpos de test vacíos y tests saltados — en JS/TS y Python.
+
+Y cada score viene con su recibo: el desglose **"¿Por qué N/100?"** muestra cuántos puntos costó cada grupo de hallazgos (severidad × peso de categoría) y si se aplicó algún techo duro.
 
 ## Cómo funciona
 
@@ -63,6 +68,7 @@ Auditorías reales: `sindresorhus/slugify` puntúa **98/100 SHIP IT** (fíjate e
 - **✂️ Snippet** — pega código para una auditoría rápida.
 - **🔀 Modo diff** — el gate de regresión. Escribe un ref base (tag/rama/sha) y VibeCheck descarga ambos árboles, los difuye, y **audita y puntúa solo los archivos cambiados**. Los hallazgos pre-existentes se excluyen del score y se cuentan. Perfecto para PRs.
 - **📈 Tendencia** — cada auditoría completa alimenta una serie histórica por repo: el reporte muestra una sparkline con la evolución y el delta contra la auditoría anterior (`↗ +5 pts`), y el badge incluye la flecha de tendencia. Los audits en modo diff se excluyen de la tendencia (puntúan cambios, no el repo).
+- **🔥 Modo roast** — el reporte serio se queda serio. Dale a "Modo roast" (web) o `--roast` (CLI) para un resumen sarcástico, determinista y compartible del daño. Mismo repo, mismo roast — es reproducible como todo lo demás aquí.
 
 ### Inicio rápido
 
@@ -99,7 +105,9 @@ El motor determinista corre local — sin servidor, sin LLM, sin base de datos:
 
 ```bash
 bun cli.ts ./mi-proyecto            # reporte legible
-bun cli.ts ./mi-proyecto --json     # salida para CI
+bun cli.ts ./mi-proyecto --json     # salida para CI (incluye scoreExplanation + roast)
+bun cli.ts ./mi-proyecto --roast    # añade la sección 🔥 roast
+bun cli.ts . --exclude tests        # excluye rutas (repetible)
 echo $?                             # 1 si el veredicto es SOSPECHOSO o PELIGRO → gate de CI
 ```
 
@@ -118,7 +126,16 @@ echo $?                             # 1 si el veredicto es SOSPECHOSO o PELIGRO 
 
 ### VibeCheck en tus Pull Requests
 
-Copia [`docs/vibecheck-action.yml`](docs/vibecheck-action.yml) a `.github/workflows/vibecheck.yml` en cualquier repo, define el secret `VIBECHECK_URL` apuntando a tu instancia, y cada PR recibirá un comentario con su Vibe Score, veredicto y badge.
+Copia [`docs/vibecheck-action.yml`](docs/vibecheck-action.yml) a `.github/workflows/vibecheck.yml` en cualquier repo, define el secret `VIBECHECK_URL` apuntando a tu instancia, y cada PR recibirá un comentario con su Vibe Score, el desglose de "¿por qué este score?" y el badge.
+
+- **Modo diff integrado**: el workflow audita el head del PR contra `github.event.pull_request.base.sha`, así que el score refleja solo lo que cambió el PR.
+- **Quality gate**: define la variable de repo `VIBECHECK_MIN_SCORE` (default `60`) y el job falla cuando el score queda por debajo.
+
+### VibeCheck audita a VibeCheck
+
+El mejor dogfooding es auditar al auditor. Cada push a `main` corre el CLI determinista sobre el propio código fuente de este repo y publica el score, el desglose punto por punto y el roast en el [resumen del job](https://github.com/tiagofur/vibe-check/actions/workflows/self-audit.yml).
+
+Dos exclusiones, a propósito y a la vista: `tests/` (el fixture versionado planta defectos a propósito) y `src/lib/samples.ts` (snippets de ejemplo con secretos falsos — el scanner los detecta, que es justo el punto).
 
 ### Badge en tu README
 
@@ -141,7 +158,7 @@ Los contenidos de los archivos auditados **nunca se persisten** — solo el repo
 
 ## Estado del proyecto
 
-**v0.1.0** — funcional y en desarrollo activo. Nació como proyecto vibe-coded, se auto-auditó y se endureció paso a paso: build limpio (sin errores de tipos ignorados), 43 tests con un fixture "vibe-coded" versionado, CI en cada push, rate limiting, caché por contenido, progreso real en streaming, modo diff, repos privados, CLI local y tendencias históricas.
+**v0.1.0** — funcional y en desarrollo activo. Nació como proyecto vibe-coded, se auto-auditó y se endureció paso a paso: build limpio (sin errores de tipos ignorados), 75 tests con un fixture "vibe-coded" versionado, CI en cada push, rate limiting, caché por contenido, progreso real en streaming, modo diff, repos privados, CLI local, tendencias históricas, score explicable, detector determinista de tests falsos y modo roast.
 
 ## Roadmap
 

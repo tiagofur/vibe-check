@@ -1,0 +1,59 @@
+# ─────────────────────────────────────────────────────────────
+# Dogfooding: VibeCheck audita a VibeCheck 🔁
+#
+# En cada push a main, el CLI determinista audita el propio código
+# fuente. Se excluyen tests/ (contienen el fixture con defectos
+# plantados a propósito) y src/lib/samples.ts (snippets de ejemplo
+# con secretos falsos: el scanner los detecta, porque funciona).
+#
+# Informativo, no bloqueante: es la vitrina, no el gate.
+# ─────────────────────────────────────────────────────────────
+name: Self-audit
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  self-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Auditar el propio repo (CLI determinista, sin IA)
+        continue-on-error: true
+        run: bun cli.ts . --exclude tests --exclude src/lib/samples.ts --json --roast > self-audit.json
+
+      - name: Publicar resumen en el job
+        if: always()
+        run: |
+          bun -e '
+            const r = JSON.parse(await Bun.file("self-audit.json").text());
+            const d = r.scoreExplanation?.deductions ?? [];
+            const cap = r.scoreExplanation?.cap;
+            const lines = [
+              "## 🔁 VibeCheck audita a VibeCheck",
+              "",
+              `**Vibe Score: ${r.score}/100 — ${r.verdict}** · ${r.stats.filesScanned} archivos · ${r.stats.totalLines} líneas`,
+              "",
+              "### ¿Por qué este score?",
+              ...(d.length
+                ? d.map((x) => `- **−${x.cost} pts** · ${x.count} hallazgo(s) de ${x.category} (${x.severity})`)
+                : ["- 🎉 Sin deducciones"]),
+              ...(cap ? [`- ⬆️ ${cap.reason}`] : []),
+              ...(r.roast?.length ? ["", "### 🔥 Roast", ...r.roast.map((x) => `- ${x}`)] : []),
+              "",
+              "_Modo determinista, cero IA, reproducible. Excluye `tests/` (fixture con defectos plantados) y `src/lib/samples.ts` (snippets de ejemplo con secretos falsos)._",
+              "",
+              "Antes de subirlo, VibeCheck it.",
+            ];
+            await Bun.file(process.env.GITHUB_STEP_SUMMARY).write(lines.join("\n") + "\n");
+          '

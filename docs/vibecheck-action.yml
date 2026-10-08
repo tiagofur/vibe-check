@@ -5,7 +5,11 @@
 # que quieras auditar, y define el secret VIBECHECK_URL con la URL
 # de tu instancia (ej. https://vibecheck.tudominio.com).
 #
-# Cada PR queda auditado: score, veredicto y badge como comentario.
+# Cada PR se audita en modo diff (solo los cambios vs la base):
+# score, desglose de "¿por qué este score?" y badge como comentario.
+#
+# Quality gate: si defines la variable de repo VIBECHECK_MIN_SCORE
+# (default 60), el job FALLA cuando el score queda por debajo.
 # ─────────────────────────────────────────────────────────────
 name: VibeCheck
 
@@ -23,15 +27,25 @@ jobs:
         env:
           VIBECHECK_URL: ${{ secrets.VIBECHECK_URL }}
           GH_TOKEN: ${{ github.token }}
+          MIN_SCORE: ${{ vars.VIBECHECK_MIN_SCORE || 60 }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.ref_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
         run: |
           set -euo pipefail
-          REPO_URL="https://github.com/${{ github.repository }}/tree/${{ github.head_ref || github.ref_name }}"
+          REPO_URL="https://github.com/${{ github.repository }}/tree/${HEAD_SHA}"
+          BODY_FILE=$(mktemp)
           BADGE="${VIBECHECK_URL}/api/badge/${{ github.repository }}.svg"
+
+          # modo diff: auditar solo los cambios respecto al SHA base del PR
+          BASE_JSON=""
+          if [ -n "$BASE_SHA" ]; then
+            BASE_JSON=$(printf ',"base":"%s"' "$BASE_SHA")
+          fi
 
           RESPONSE=$(curl -sS --max-time 300 -X POST "${VIBECHECK_URL}/api/analyze-repo" \
             -H 'Content-Type: application/json' \
             -H 'Accept: application/json' \
-            -d "{\"source\":\"github\",\"url\":\"${REPO_URL}\"}")
+            -d "{\"source\":\"github\",\"url\":\"${REPO_URL}\"${BASE_JSON}}")
 
           SCORE=$(echo "$RESPONSE" | jq -r '.report.score // empty')
           if [ -z "$SCORE" ]; then
@@ -45,10 +59,26 @@ jobs:
           SUMMARY=$(echo "$RESPONSE" | jq -r '.report.summary')
           FILES=$(echo "$RESPONSE" | jq -r '.report.stats.filesAudited')
 
-          gh pr comment "${{ github.event.pull_request.number }}" \
-            --body "## 🕵️ VibeCheck: **${SCORE}/100** — ${VERDICT}
+          {
+            echo "## 🕵️ VibeCheck: **${SCORE}/100** — ${VERDICT}"
+            echo ""
+            echo "${SUMMARY}"
+            echo ""
+            echo "### ¿Por qué este score?"
+            # desglose de puntos (reportes cacheados viejos pueden no traerlo)
+            echo "$RESPONSE" | jq -r '.report.scoreExplanation.deductions[]? | "- **−\(.cost) pts** · \(.count) hallazgo(s) de \(.category) (\(.severity))"' || true
+            echo "$RESPONSE" | jq -r '.report.scoreExplanation.cap.reason // empty' | sed 's/^/- ⬆️ /' || true
+            echo ""
+            echo "${FILES} archivos auditados a fondo · [badge](${BADGE})"
+            echo ""
+            echo "> Desglose deducido por severidad × peso de categoría. Auditoría asistida por IA: no sustituye una code review humana."
+          } > "$BODY_FILE"
 
-          ${SUMMARY}
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file "$BODY_FILE"
 
-          ${FILES} archivos auditados a fondo · [badge](${BADGE})
-          > Las auditorías son asistidas por IA: no sustituyen una code review humana."
+          # ── Quality gate: falla si el score de los cambios queda bajo el umbral ──
+          if [ "$SCORE" -lt "$MIN_SCORE" ]; then
+            gh pr comment "${{ github.event.pull_request.number }}" \
+              --body "❌ **VibeCheck gate**: score **${SCORE}/100** por debajo del umbral **${MIN_SCORE}** (ajústalo con la variable de repo \`VIBECHECK_MIN_SCORE\`). Revisa los hallazgos del comentario anterior."
+            exit 1
+          fi

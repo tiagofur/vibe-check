@@ -1,13 +1,16 @@
 # VibeCheck
 
 [![CI](https://github.com/tiagofur/vibe-check/actions/workflows/ci.yml/badge.svg)](https://github.com/tiagofur/vibe-check/actions/workflows/ci.yml)
+[![Self-audit](https://github.com/tiagofur/vibe-check/actions/workflows/self-audit.yml/badge.svg)](https://github.com/tiagofur/vibe-check/actions/workflows/self-audit.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
-[![Tests](https://img.shields.io/badge/tests-43%20passing-emerald)](tests)
+[![Tests](https://img.shields.io/badge/tests-75%20passing-emerald)](tests)
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/tiagofur)
 
 > **Adversarial due diligence for repositories in the vibe coding era.** Did an AI write that repo at 3 AM? Find out **before you clone**.
+>
+> **Before you ship it, VibeCheck it.**
 
 [Read in Spanish](README.es.md) · [Quick start](#quick-start) · [Docs](#documentation) · [API](#api) · [Roadmap](#roadmap) · [Contributing](#contributing) · [Issues](https://github.com/tiagofur/vibe-check/issues)
 
@@ -36,7 +39,9 @@ VibeCheck is built for exactly that gap.
 | 🐛 Bugs | 0.25 | Off-by-one, unhandled nulls, race conditions, **fake tests** (that cannot fail) |
 | 🏭 Overengineering | 0.15 | Unjustified abstractions, dead code, unused dependencies, orphan files |
 
-On top of that, a **deterministic engine** (100% reproducible, zero LLM) verifies structural checks: import graph vs. manifest, phantom dependencies, broken imports, secret patterns, committed `.env`, dead deps, and files nobody imports.
+On top of that, a **deterministic engine** (100% reproducible, zero LLM) verifies structural checks: import graph vs. manifest (including **tsconfig/jsconfig path aliases**), phantom dependencies, broken imports, secret patterns, committed `.env`, dead deps, and files nobody imports. It also ships a **fake-test detector**: suites that cannot fail (zero assertions), tautological assertions (`expect(true).toBe(true)`), empty test bodies and skipped tests — in JS/TS and Python.
+
+Every score comes with its receipt: the **"Why N/100?" breakdown** shows how many points each group of findings cost (severity × category weight) and whether a hard ceiling was applied.
 
 ## How it works
 
@@ -63,6 +68,7 @@ Real audits: `sindresorhus/slugify` scores **98/100 SHIP IT** (note the trend sp
 - **✂️ Snippet** — paste code for a quick audit.
 - **🔀 Diff mode** — the regression gate. Enter a base ref (tag/branch/sha) and VibeCheck downloads both trees, diffs them, and **audits and scores only the changed files**. Pre-existing findings are excluded from the score and counted. Perfect for PRs.
 - **📈 Trend** — every full audit feeds a historical series per repo: the report shows a sparkline with the score evolution and the delta vs the previous audit (`↗ +5 pts`), and the badge shows the trend arrow. Diff audits are excluded from trends (they score changes, not the repo).
+- **🔥 Roast mode** — the serious report stays serious. Hit "Modo roast" (web) or `--roast` (CLI) for a deterministic, shareable sarcastic summary of the damage. Same repo, same roast — it's reproducible like everything else here.
 
 ### Quick start
 
@@ -99,7 +105,9 @@ The deterministic engine runs locally — no server, no LLM, no database:
 
 ```bash
 bun cli.ts ./my-project            # human-readable report
-bun cli.ts ./my-project --json     # machine-readable
+bun cli.ts ./my-project --json     # machine-readable (includes scoreExplanation + roast)
+bun cli.ts ./my-project --roast    # adds the 🔥 roast section
+bun cli.ts . --exclude tests       # exclude paths (repeatable)
 echo $?                            # 1 if verdict is SUSPICIOUS or DANGER → CI gate
 ```
 
@@ -118,7 +126,16 @@ echo $?                            # 1 if verdict is SUSPICIOUS or DANGER → CI
 
 ### VibeCheck on your Pull Requests
 
-Copy [`docs/vibecheck-action.yml`](docs/vibecheck-action.yml) to `.github/workflows/vibecheck.yml` in any repo, set the `VIBECHECK_URL` secret to your instance, and every PR gets a comment with its Vibe Score, verdict and badge.
+Copy [`docs/vibecheck-action.yml`](docs/vibecheck-action.yml) to `.github/workflows/vibecheck.yml` in any repo, set the `VIBECHECK_URL` secret to your instance, and every PR gets a comment with its Vibe Score, the "why this score" breakdown and the badge.
+
+- **Diff mode built in**: the workflow audits the PR head against `github.event.pull_request.base.sha`, so the score reflects only what the PR changed.
+- **Quality gate**: define the repo variable `VIBECHECK_MIN_SCORE` (default `60`) and the job fails when the score drops below it.
+
+### VibeCheck audits VibeCheck
+
+The best dogfooding is auditing the auditor. Every push to `main` runs the deterministic CLI against this repo's own source and publishes the score, the point-by-point breakdown and the roast to the [job summary](https://github.com/tiagofur/vibe-check/actions/workflows/self-audit.yml).
+
+Two exclusions, on purpose and in the open: `tests/` (the versioned fixture plants defects on purpose) and `src/lib/samples.ts` (example snippets with fake secrets — the scanner catches them, which is exactly the point).
 
 ### Badge in your README
 
@@ -141,7 +158,7 @@ Audited file contents are **never persisted** — only the report (scores, findi
 
 ## Project status
 
-**v0.1.0** — functional and actively developed. Born as a vibe-coded project, audited by itself, and hardened step by step: clean build (no ignored type errors), 43 tests with a versioned "vibe-coded" fixture, CI on every push, rate limiting, content cache, real streaming progress, diff mode, private repos, local CLI and historical trends.
+**v0.1.0** — functional and actively developed. Born as a vibe-coded project, audited by itself, and hardened step by step: clean build (no ignored type errors), 75 tests with a versioned "vibe-coded" fixture, CI on every push, rate limiting, content cache, real streaming progress, diff mode, private repos, local CLI, historical trends, explainable scores, a deterministic fake-test detector and roast mode.
 
 ## Roadmap
 
