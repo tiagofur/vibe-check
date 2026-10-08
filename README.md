@@ -89,7 +89,7 @@ bun run db:generate && bun run db:push
 bun run dev
 ```
 
-> The AI SDK (`z-ai-web-dev-sdk`) is configured per its own docs (`.z-ai-config` file); it is never used client-side. The deterministic engine and the CLI work without it.
+> The AI SDK (`z-ai-web-dev-sdk`) is configured per its own docs (`.z-ai-config` file); it is never used client-side. Without credentials the web app **falls back to deterministic-only reports** automatically (see the ⚡ badge on the report) — and the CLI never needed it.
 
 | Command | What it does |
 |---|---|

@@ -243,10 +243,8 @@ export default function Home() {
   const resultsRef = useRef<HTMLDivElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    folderInputRef.current?.setAttribute('webkitdirectory', '')
-    folderInputRef.current?.setAttribute('directory', '')
-  }, [])
+  // webkitdirectory vive en el JSX del input: el tab puede no estar
+  // montado cuando corre un useEffect de mount, y el atributo se perdería
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -701,6 +699,7 @@ export default function Home() {
                         ref={folderInputRef}
                         type="file"
                         multiple
+                        {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
                         onChange={onFolderInput}
                         className="hidden"
                         aria-label="Seleccionar carpeta"

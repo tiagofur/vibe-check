@@ -89,7 +89,7 @@ bun run db:generate && bun run db:push
 bun run dev
 ```
 
-> El SDK de IA (`z-ai-web-dev-sdk`) se configura según su propia documentación (archivo `.z-ai-config`); nunca se usa en el cliente. El motor determinista y el CLI funcionan sin él.
+> El SDK de IA (`z-ai-web-dev-sdk`) se configura según su propia documentación (archivo `.z-ai-config`); nunca se usa en el cliente. Sin credenciales, la app web **cae automáticamente a reportes solo deterministas** (verás el badge ⚡ en el reporte) — y el CLI nunca la necesitó.
 
 | Comando | Qué hace |
 |---|---|

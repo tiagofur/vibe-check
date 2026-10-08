@@ -83,3 +83,18 @@ Stage Summary:
 - Las carpetas locales con node_modules funcionan: el walker ni las camina, y los topes (800×256KB/8MB) permiten proyectos reales.
 - Argyectos: src/lib/tar-gz.ts, src/lib/folder-pick.ts, route.ts (downloadTree/fetchDefaultBranch/zod), page.tsx (walker+readFolder+toasts), tests tar-gz+folder-pick (94 en verde).
 - Pendiente: probar el flujo de carpeta en el navegador real (drag&drop manual del usuario); con .z-ai-config, dev_deck debería auditar de punta a punta.
+
+---
+Task ID: 5
+Agent: ZCode (GLM)
+Task: Dos bugs del testeo del usuario: el selector local solo permitía archivos (no carpetas) y GitHub seguía fallando sin credenciales de IA — pedir opciones.
+
+Work Log:
+- **Selector de carpetas**: el input con webkitdirectory vive en el tab "Carpeta local", que Radix desmonta al no estar activo. El useEffect de mount corría con el ref en null → el atributo nunca se aplicaba → diálogo en modo archivos. Fix: atributos webkitdirectory/directorio en el propio JSX (spread con cast), inmunes al timing de montaje. Verificado en navegador: el input monta con los atributos puestos.
+- **Modo determinista sin IA (fallback)**: nuevo src/lib/deterministic-report.ts — buildDeterministicNarrative() redacta summary/arquitectura/vibeSignals/topRisks/summaries SOLO con hechos del escaneo (conteos, críticos/altos, señales derivadas de structural checks con count>0, topRisks = críticos+altos cap 4). route.ts: ZAI.create() en try/catch → engine='determinista', se salta la auditoría IA y la síntesis se construye tras el scoring (necesita verdict/categories del paso 6). RepoReport ganó engine?: 'ia' | 'determinista'. UI: badge "⚡ modo determinista (sin IA)" junto al veredicto. 95 tests (2 nuevos del narrative).
+- E2E sin IA en local: tiagofur/dev_deck de punta a punta → 35/100 PELIGRO, 712 archivos, 16 hallazgos (1 crítico, 14 altos), señales: secretos, .env commiteado, imports rotos, huérfanos. Badge visible en el reporte del historial (captura verificada en navegador).
+- READMEs: la nota del Quick start ahora explica el fallback automático sin credenciales.
+
+Stage Summary:
+- La app es funcional al 100% sin .z-ai-config: cualquier repo de GitHub o carpeta local produce reporte completo (score explicable, chequeos, roast) con badge de modo determinista; con credenciales, la IA se agrega encima.
+- Arreglos: page.tsx (webkitdirectory en JSX), deterministic-report.ts (nuevo), route.ts (try/catch ZAI + narrativa post-scoring), repo-types (engine), repo-report-view (badge).

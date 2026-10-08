@@ -16,7 +16,8 @@ import {
 } from '@/lib/repo-scan'
 import { changedPaths, diffTrees, type TreeDiff } from '@/lib/repo-diff'
 import { explainScore, mergeAndScore, verdictFromScore } from '@/lib/repo-score'
-import { auditBatch, selectAuditFiles, synthesizeReport } from '@/lib/repo-llm'
+import { auditBatch, selectAuditFiles, synthesizeReport, type ReduceResult } from '@/lib/repo-llm'
+import { buildDeterministicNarrative } from '@/lib/deterministic-report'
 import { FOLDER_CAPS } from '@/lib/folder-pick'
 import { MAX_DECOMPRESSED_BYTES, readTarTree, type TreeReadResult } from '@/lib/tar-gz'
 import type { CategoryKey } from '@/lib/vibe-types'
@@ -450,60 +451,107 @@ async function runAudit(
       : `Grafo de imports listo: ${scan.findings.length} hallazgos estructurales en ${treeCount} archivos`,
   })
 
-  // ── 4. Auditoría IA por lotes (solo cambios en modo diff) ──
+  // ── 4. Auditoría IA por lotes — con fallback determinista sin credenciales ──
   const auditPool = changed ? files.filter((f) => changed.has(f.path)) : files
-  const zai = await ZAI.create()
-  const selection = selectAuditFiles(auditPool, scan.checks.manifestName)
   const aiRaw: RepoFinding[] = []
-  const totalBatches = selection.batches.length
-  for (let i = 0; i < totalBatches; i++) {
-    const batch = selection.batches[i]
-    if (!batch) continue
+  let engine: 'ia' | 'determinista' = 'ia'
+  let auditedPaths: string[] = []
+  let zai: Awaited<ReturnType<typeof ZAI.create>> | null = null
+  try {
+    zai = await ZAI.create()
+  } catch (aiError) {
+    engine = 'determinista'
+    console.error('[vibecheck] IA no disponible — reporte solo con el motor determinista:', aiError)
     emit({
       type: 'progress',
       phase: 'ia',
-      pct: 30 + Math.round(40 * (i / Math.max(1, totalBatches))),
-      message: `Auditando con IA: lote ${i + 1} de ${totalBatches} (${batch.length} archivos${changed ? ' cambiados' : ' críticos'})…`,
+      pct: 45,
+      message: 'Sin credenciales de IA — redactando con el motor determinista (reproducible)…',
     })
-    const raw = await auditBatch(zai, treePreview, batch)
-    for (const f of raw) {
-      aiRaw.push({ ...f, origin: 'ai' })
+  }
+
+  if (zai) {
+    const selection = selectAuditFiles(auditPool, scan.checks.manifestName)
+    auditedPaths = selection.auditedPaths
+    const totalBatches = selection.batches.length
+    for (let i = 0; i < totalBatches; i++) {
+      const batch = selection.batches[i]
+      if (!batch) continue
+      emit({
+        type: 'progress',
+        phase: 'ia',
+        pct: 30 + Math.round(40 * (i / Math.max(1, totalBatches))),
+        message: `Auditando con IA: lote ${i + 1} de ${totalBatches} (${batch.length} archivos${changed ? ' cambiados' : ' críticos'})…`,
+      })
+      const raw = await auditBatch(zai, treePreview, batch)
+      for (const f of raw) {
+        aiRaw.push({ ...f, origin: 'ai' })
+      }
     }
   }
 
-  // ── 5. Síntesis ─────────────────────────────────────────
-  emit({ type: 'progress', phase: 'sintesis', pct: 78, message: 'Redactando el veredicto del repo…' })
-  const reduced = await synthesizeReport(zai, {
-    repoName,
-    branch,
-    stars,
-    treePreview,
-    scanFindings: scan.findings,
-    aiFindings: aiRaw,
-    stats: {
-      filesScanned: treeCount,
-      filesAudited: selection.auditedPaths.length,
-      totalLines: scan.stats.totalLines,
-      languages: scan.stats.languages,
-      truncated,
-    },
-    externalUsed: scan.stats.externalUsed,
-    diff: diff && baseRef ? { base: baseRef, changed: changed?.size ?? 0 } : undefined,
+  // ── 5. Síntesis (IA; la determinista se redacta tras el scoring) ──
+  emit({
+    type: 'progress',
+    phase: 'sintesis',
+    pct: 78,
+    message: engine === 'ia' ? 'Redactando el veredicto del repo…' : 'Veredicto determinista del repo…',
   })
+  let reduced: ReduceResult | null = null
+  if (zai) {
+    reduced = await synthesizeReport(zai, {
+      repoName,
+      branch,
+      stars,
+      treePreview,
+      scanFindings: scan.findings,
+      aiFindings: aiRaw,
+      stats: {
+        filesScanned: treeCount,
+        filesAudited: auditedPaths.length,
+        totalLines: scan.stats.totalLines,
+        languages: scan.stats.languages,
+        truncated,
+      },
+      externalUsed: scan.stats.externalUsed,
+      diff: diff && baseRef ? { base: baseRef, changed: changed?.size ?? 0 } : undefined,
+    })
+  }
 
   // ── 6. Merge de hallazgos + scoring (fuente única: repo-score) ──
   emit({ type: 'progress', phase: 'guardado', pct: 92, message: 'Calculando el Vibe Score…' })
   const { categories, score: mergedScore, excludedCount } = mergeAndScore(scan.findings, aiRaw, {
     onlyFiles: changed ?? undefined,
   })
-  // la síntesis de IA redacta los summaries por categoría
+  const verdict = verdictFromScore(mergedScore)
+  const structuralChecks = buildStructuralChecks(scan.checks)
+
+  // sin IA, la narrativa se redacta con hechos del escaneo (verificables)
+  if (!reduced) {
+    reduced = buildDeterministicNarrative({
+      repoName,
+      branch,
+      verdict,
+      stats: {
+        filesScanned: treeCount,
+        filesAudited: auditedPaths.length,
+        totalLines: scan.stats.totalLines,
+        languages: scan.stats.languages,
+      },
+      structural: structuralChecks,
+      categories,
+      manifestName: scan.checks.manifestName,
+    })
+  }
+
+  // la síntesis (IA o determinista) redacta los summaries por categoría
   for (const key of Object.keys(categories) as CategoryKey[]) {
     categories[key].summary = reduced.categorySummaries[key]
   }
 
   const report: RepoReport = {
     score: mergedScore,
-    verdict: verdictFromScore(mergedScore),
+    verdict,
     repoName,
     source: body.source,
     branch,
@@ -512,7 +560,7 @@ async function runAudit(
     architecture: reduced.architecture,
     stats: {
       filesScanned: treeCount,
-      filesAudited: selection.auditedPaths.length,
+      filesAudited: auditedPaths.length,
       totalLines: scan.stats.totalLines,
       languages: scan.stats.languages,
       truncated,
@@ -529,9 +577,10 @@ async function runAudit(
         : undefined,
     vibeSignals: reduced.vibeSignals,
     topRisks: reduced.topRisks,
-    structural: buildStructuralChecks(scan.checks),
+    structural: structuralChecks,
     categories,
     scoreExplanation: explainScore(categories, mergedScore),
+    engine,
   }
 
   // ── 7. Persistir historial + caché (nunca los contenidos) ──

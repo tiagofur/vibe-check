@@ -76,6 +76,8 @@ export interface RepoReport {
   categories: Record<CategoryKey, { score: number; summary: string; findings: RepoFinding[] }>
   /** Presente en reportes nuevos: por qué el score es N (reportes cacheados viejos pueden omitirlo) */
   scoreExplanation?: ScoreExplanation
+  /** Motor que redactó el reporte: 'ia' (default en reportes viejos) o 'determinista' (sin LLM) */
+  engine?: 'ia' | 'determinista'
 }
 
 export interface RepoCheckHistoryItem {

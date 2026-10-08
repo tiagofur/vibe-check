@@ -248,6 +248,15 @@ export function RepoReportView({
                       {report.diff.filesAdded} ~{report.diff.filesModified} −{report.diff.filesDeleted}
                     </Badge>
                   )}
+                  {report.engine === 'determinista' && (
+                    <Badge
+                      variant="outline"
+                      className="gap-1.5 border-sky-500/40 text-xs text-sky-300"
+                      title="Sin auditoría IA: todo lo que ves sale del motor determinista, 100% reproducible"
+                    >
+                      ⚡ modo determinista (sin IA)
+                    </Badge>
+                  )}
                   {report.source === 'github' ? (
                     <Badge variant="outline" className="gap-1.5 border-border text-xs text-muted-foreground">
                       <Github className="size-3.5" aria-hidden /> repo público
