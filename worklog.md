@@ -160,3 +160,16 @@ Work Log:
 
 Stage Summary:
 - Los defaults ya no envejecen a ciegas: quedaron anclados a precios y ids verificados en los catálogos vivos, con el router gratuito de OpenRouter como default del provider "muchos modelos".
+
+---
+Task ID: 10
+Agent: ZCode (GLM)
+Task: --ai en el CLI — auditoría IA por lotes sin servidor, para revisar apps locales con una sola línea.
+
+Work Log:
+- cli.ts: flag --ai — getLLM() → selectAuditFiles/auditBatch/synthesizeReport (mismos lotes que la web) → mergeAndScore(scan.findings, aiRaw con origin:'ai'). Progreso y avisos por stderr (stdout queda limpio para --json/--fix-pack); sin credenciales cae al determinista con aviso honesto; config inválida ídem. Salida humana: encabezado "auditoría con IA (provider · model)", bloque "🤖 Resumen (IA)" con summary + 3 señales, hallazgos etiquetados 🤖 IA vs ✓ escaneo. JSON: mode/ai{provider,model,filesAudited,findings}/summary. Fix: 'name' se usaba antes de declararse (ReferenceError al sintetizar).
+- tests/cli-ai.test.ts (3): E2E real — mock LLM como PROCESO aparte (spawn node -e con puerto efímero) porque dentro del worker de vitest spawnSync bloquea el event loop y el fetch del CLI entra en deadlock (60s de timeout, status null); cubre fallback sin credenciales, ida y vuelta del hallazgo del mock con etiqueta 🤖, y bloque ai/summary del JSON. 135 tests.
+- READMEs: --ai en la sección CLI.
+
+Stage Summary:
+- "¿Cómo reviso mi app con IA?" ahora tiene respuesta de una línea: bun cli.ts <carpeta> --ai (o la web, que ya la tenía). El CLI ya no es determinista-only: mismo motor de IA que la API, sin servidor ni base de datos, con la key del .env.

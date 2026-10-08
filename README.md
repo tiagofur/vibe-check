@@ -121,6 +121,7 @@ The deterministic engine runs locally — no server, no LLM, no database:
 
 ```bash
 bun cli.ts ./my-project            # human-readable report
+bun cli.ts ./my-project --ai       # adds the AI batch audit (needs an API key in the env)
 bun cli.ts ./my-project --json     # machine-readable (includes scoreExplanation + roast)
 bun cli.ts ./my-project --roast    # adds the 🔥 roast section
 bun cli.ts . --exclude tests       # exclude paths (repeatable)

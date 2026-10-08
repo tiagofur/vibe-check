@@ -14,10 +14,12 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve, relative } from 'node:path'
 import { isScannablePath, scanRepo, SKIP_DIRS } from './src/lib/repo-scan'
 import { mergeAndScore, explainScore } from './src/lib/repo-score'
+import { auditBatch, selectAuditFiles, synthesizeReport, type ReduceResult } from './src/lib/repo-llm'
+import { getLLM, type LlmClient } from './src/lib/llm'
 import { roastRepo } from './src/lib/roast'
 import { buildFixPack } from './src/lib/fix-prompts'
 import { CATEGORY_META, SEVERITY_META, VERDICT_META, verdictFromScore, type CategoryKey } from './src/lib/vibe-types'
-import type { RepoFile } from './src/lib/repo-types'
+import type { RepoFinding, RepoFile } from './src/lib/repo-types'
 
 /** Truncado de contenido al leer: los archivos grandes aportan imports, no texto completo */
 const READ_CAP = 64 * 1024
@@ -43,13 +45,15 @@ function walkDir(dir: string, root: string, out: RepoFile[]): void {
 }
 
 function usage(): never {
-  console.error(`Uso: bun cli.ts <carpeta> [--json] [--roast] [--exclude <ruta>] [--fix-pack]
+  console.error(`Uso: bun cli.ts <carpeta> [--json] [--roast] [--exclude <ruta>] [--fix-pack] [--ai]
 
 Opciones:
   --json             Salida JSON (para CI u otras herramientas)
   --roast            Añade el modo roast 🔥 (humor determinista, no evidencia)
   --exclude <ruta>   Excluye rutas del escaneo (repetible, ej. tests/fixtures)
   --fix-pack         Imprime los hallazgos como prompts de corrección (redirige a fixes.md)
+  --ai               Añade la auditoría IA por lotes (requiere una API key en el entorno;
+                     sin credenciales cae al modo determinista con un aviso)
 
 Exit codes: 0 = SHIP IT / CASI LISTO · 1 = SOSPECHOSO / PELIGRO o error`)
   process.exit(1)
@@ -93,10 +97,57 @@ async function main() {
   }
 
   const scan = scanRepo(scanned)
-  const { categories, score } = mergeAndScore(scan.findings, [])
+  const name = root.split('/').pop() ?? root
+
+  // ── Auditoría IA opcional (--ai): mismos lotes que la web ──
+  const asAI = args.includes('--ai')
+  let llm: LlmClient | null = null
+  if (asAI) {
+    try {
+      llm = await getLLM()
+    } catch (e) {
+      console.error(`⚠️  Configuración de IA inválida (${e instanceof Error ? e.message : e}) — corriendo determinista.`)
+    }
+    if (!llm) {
+      console.error(
+        '⚠️  --ai pedida pero no hay credenciales (GEMINI_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, ZAI_API_KEY u OLLAMA_MODEL) — corriendo determinista.',
+      )
+    }
+  }
+  const aiRaw: RepoFinding[] = []
+  let narrative: ReduceResult | null = null
+  let aiAuditedCount = 0
+  if (llm) {
+    const contentFiles = scanned.filter((f) => f.content.length > 0)
+    const selection = selectAuditFiles(contentFiles, scan.checks.manifestName)
+    aiAuditedCount = selection.auditedPaths.length
+    console.error(`🤖 IA: ${llm.provider} · ${llm.model} — auditando ${selection.auditedPaths.length} archivos en ${selection.batches.length} lote(s)…`)
+    for (const batch of selection.batches) {
+      for (const f of await auditBatch(llm, scanned.map((x) => x.path), batch)) {
+        aiRaw.push({ ...f, origin: 'ai' })
+      }
+    }
+    narrative = await synthesizeReport(llm, {
+      repoName: name,
+      branch: null,
+      stars: null,
+      treePreview: scanned.map((f) => f.path),
+      scanFindings: scan.findings,
+      aiFindings: aiRaw,
+      stats: {
+        filesScanned: scanned.length,
+        filesAudited: selection.auditedPaths.length,
+        totalLines: scan.stats.totalLines,
+        languages: scan.stats.languages,
+        truncated: false,
+      },
+      externalUsed: scan.stats.externalUsed,
+    })
+  }
+
+  const { categories, score } = mergeAndScore(scan.findings, aiRaw)
   const explanation = explainScore(categories, score)
   const verdict = verdictFromScore(score)
-  const name = root.split('/').pop() ?? root
   const roast = asRoast
     ? roastRepo({
         repoName: name,
@@ -135,7 +186,11 @@ async function main() {
           name,
           score,
           verdict,
-          mode: 'determinista (sin IA)',
+          mode: llm ? `ia (${llm.provider} · ${llm.model})` : 'determinista (sin IA)',
+          ai: llm
+            ? { provider: llm.provider, model: llm.model, filesAudited: aiAuditedCount, findings: aiRaw.length }
+            : null,
+          summary: narrative?.summary ?? null,
           stats: { filesScanned: scanned.length, totalLines: scan.stats.totalLines, languages: scan.stats.languages },
           checks: scan.checks,
           categories,
@@ -148,7 +203,7 @@ async function main() {
     )
   } else {
     const v = VERDICT_META[verdict]
-    console.log(`🕵️ VibeCheck — auditoría determinista (sin IA)`)
+    console.log(llm ? `🕵️ VibeCheck — auditoría con IA (${llm.provider} · ${llm.model})` : `🕵️ VibeCheck — auditoría determinista (sin IA)`)
     console.log(`Repo: ${name} · ${scanned.length} archivos · ${scan.stats.totalLines} líneas`)
     if (scan.stats.languages.length) console.log(`Lenguajes: ${scan.stats.languages.join(', ')}`)
     console.log('')
@@ -170,6 +225,14 @@ async function main() {
       }
       if (explanation.cap) console.log(`   • ⬆️ ${explanation.cap.reason}`)
     }
+    if (narrative) {
+      console.log('')
+      console.log('  🤖 Resumen (IA):')
+      console.log(`   ${narrative.summary}`)
+      for (const s of narrative.vibeSignals.slice(0, 3)) {
+        console.log(`   • ${s.title}${s.detail ? ` — ${s.detail}` : ''}`)
+      }
+    }
     const findings = (Object.keys(categories) as CategoryKey[]).flatMap((k) => categories[k].findings)
     if (findings.length > 0) {
       console.log('')
@@ -177,7 +240,8 @@ async function main() {
       for (const f of findings) {
         const sev = SEVERITY_META[f.severity]
         const lines = f.lines.length ? `:L${f.lines.slice(0, 3).join(',L')}` : ''
-        console.log(`   • [${sev.label.toUpperCase()}] ${f.title} — ${f.file}${lines}`)
+        const origin = f.origin === 'ai' ? '  🤖 IA' : ''
+        console.log(`   • [${sev.label.toUpperCase()}] ${f.title} — ${f.file}${lines}${origin}`)
         console.log(`       ${f.explanation}`)
         console.log(`       Fix: ${f.fix}`)
       }

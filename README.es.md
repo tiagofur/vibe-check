@@ -121,6 +121,7 @@ El motor determinista corre local — sin servidor, sin LLM, sin base de datos:
 
 ```bash
 bun cli.ts ./mi-proyecto            # reporte legible
+bun cli.ts ./mi-proyecto --ai       # añade la auditoría IA por lotes (requiere una API key en el entorno)
 bun cli.ts ./mi-proyecto --json     # salida para CI (incluye scoreExplanation + roast)
 bun cli.ts ./mi-proyecto --roast    # añade la sección 🔥 roast
 bun cli.ts . --exclude tests        # excluye rutas (repetible)
